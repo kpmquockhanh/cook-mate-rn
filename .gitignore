@@ -1,23 +1,81 @@
+## Expo / React Native
 node_modules/
 .expo/
+.expo-shared/
+.expo-shared/assets.json
+.expo/types/**
+web-build/
 dist/
+build/
+
+## Expo EAS
+.eas/
+
+## Logs
+logs/
+*.log
 npm-debug.*
+yarn-debug.log*
+yarn-error.log*
+
+## OS
+.DS_Store
+Thumbs.db
+
+## Environment files
+.env
+.env.*
+!.env.example
+.direnv/
+
+## Editor/IDE
+.vscode/
+.idea/
+*.iml
+
+## Caches
+.cache/
+.parcel-cache/
+
+## React Native / Metro
+.metro-health-check*
+*.packager.log
+*.tmp
+*.lock.tmp
+*.orig.*
+
+## Android
+android
+android/.gradle/
+android/captures/
+android/app/build/
+android/build/
+.gradle/
+*.keystore
+
+## iOS
+ios
+ios/Pods/
+ios/build/
+ios/DerivedData/
+*.xcuserdatad
+*.xcworkspace/xcuserdata/
+*.xcuserstate
+
+## Certificates and sensitive files
 *.jks
 *.p8
 *.p12
 *.key
 *.mobileprovision
-*.orig.*
-web-build/
 
+## Coverage
+coverage/
+.nyc_output/
 
+## .cursor/
+.cursor/
 
+## Bmad
+.bmad-core/
 
-ios
-android
-
-# macOS
-.DS_Store
-
-# Temporary files created by Metro to check the health of the file watcher
-.metro-health-check*
