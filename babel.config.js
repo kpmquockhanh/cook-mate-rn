@@ -7,8 +7,7 @@ module.exports = function (api) {
       'nativewind/babel'
     ],
     plugins: [
-      // Required for expo-router
-      // require.resolve('expo-router/babel'),
+      'react-native-worklets-core/plugin',
     ],
   };
 };
