@@ -75,7 +75,7 @@ export default function CookingPage() {
   };
 
   // Enhanced step navigation with voice feedback
-  const goToNextStep = () => {
+  const goToNextStep = (sendContextualUpdate?: (content: string) => Promise<void>) => {
     const steps = recipeData?.instructions || [];
     if (currentStep < steps.length - 1) {
       Animated.sequence([
@@ -93,11 +93,11 @@ export default function CookingPage() {
 
       setCurrentStep(prev => prev + 1);
     } else {
-      speak("You've completed all steps! Great job!");
+      sendContextualUpdate?.("User has completed all steps! Great job! Consider this for next response.");
     }
   };
 
-  const goToPreviousStep = () => {
+  const goToPreviousStep = (sendContextualUpdate?: (content: string) => Promise<void>) => {
     if (currentStep > 0) {
       Animated.sequence([
         Animated.timing(stepTransitionAnim, {
@@ -113,6 +113,9 @@ export default function CookingPage() {
       ]).start();
 
       setCurrentStep(prev => prev - 1);
+    } else {
+    const instruction = currentStepData?.instruction_text || 'No instruction available';
+    sendContextualUpdate?.(`Current step is: ${instruction}. Consider this for next response.`);
     }
   };
 
@@ -160,14 +163,6 @@ export default function CookingPage() {
   const currentStepTimer = stepTimers[currentStep]
     ? activeTimers.find(timer => timer.id === stepTimers[currentStep])
     : null;
-
-  // Auto-speak when step changes
-  useEffect(() => {
-    if (recipeData?.instructions?.[currentStep]) {
-      const instruction = recipeData?.instructions[currentStep].instruction_text;
-      speak(`Step ${currentStep + 1}: ${instruction}`);
-    }
-  }, [currentStep, recipeData?.instructions]);
 
   // Show loading state
   if (loading) {
@@ -271,7 +266,7 @@ export default function CookingPage() {
           {/* Hint Card */}
           <View className="mt-2 bg-orange-50 rounded-xl p-4 border border-orange-100">
             <Text className="text-orange-700 text-sm">
-              Say "next step" or "previous step" to navigate
+              Say &quot;next step&quot; or &quot;previous step&quot; to navigate
             </Text>
           </View>
         </Animated.View>
@@ -346,7 +341,7 @@ export default function CookingPage() {
         {/* Primary actions: Previous / Next */}
         <View className="flex-row justify-between mb-3">
           <TouchableOpacity
-            onPress={goToPreviousStep}
+            onPress={() => goToPreviousStep()}
             disabled={currentStep === 0}
             className={`flex-row items-center px-6 py-3 rounded-xl ${currentStep === 0 ? 'bg-gray-100' : 'bg-gray-200'
               }`}>
@@ -358,12 +353,12 @@ export default function CookingPage() {
             <Text
               className={`ml-2 font-medium ${currentStep === 0 ? 'text-gray-400' : 'text-gray-700'
                 }`}>
-              Say "Back"
+              Say &quot;Back&quot;
             </Text>
           </TouchableOpacity>
 
           <TouchableOpacity
-            onPress={goToNextStep}
+            onPress={() => goToNextStep()}
             disabled={currentStep === steps.length - 1}
             className={`flex-row items-center px-6 py-3 rounded-xl ${currentStep === steps.length - 1 ? 'bg-gray-100' : 'bg-primary'
               }`}>

@@ -9,9 +9,9 @@ import {
 } from 'react-native';
 
 interface WebRTCActionsProps {
-  onNextStep?: () => void;
-  onPreviousStep?: () => void;
-  onRepeatStep?: () => void;
+  onNextStep?: (sendContextualUpdate: (content: string) => Promise<void>) => void;
+  onPreviousStep?: (sendContextualUpdate: (content: string) => Promise<void>) => void;
+  onRepeatStep?: (sendContextualUpdate: (content: string) => Promise<void>) => void;
   onStarted?: () => void;
   onEnded?: () => void;
 }
@@ -26,15 +26,15 @@ const ConversationScreen: React.FC<WebRTCActionsProps> = ({
   const conversation = useConversation({
     clientTools: {
       next: () => {
-        onNextStep?.();
+        onNextStep?.(sendContextualUpdate);
         return 'next';
       },
       back: () => {
-        onPreviousStep?.();
+        onPreviousStep?.(sendContextualUpdate);
         return 'back';
       },
       repeat: () => {
-        onRepeatStep?.();
+        onRepeatStep?.(sendContextualUpdate);
         return 'repeat';
       },
     },
@@ -64,6 +64,13 @@ const ConversationScreen: React.FC<WebRTCActionsProps> = ({
     },
   });
 
+  const sendContextualUpdate = async (content: string) => {
+    return;
+    // await conversation.sendContextualUpdate(
+    //   content
+    // );
+  };
+
   const [isStarting, setIsStarting] = useState(false);
 
   const startConversation = async () => {
@@ -77,6 +84,7 @@ const ConversationScreen: React.FC<WebRTCActionsProps> = ({
           platform: Platform.OS,
         },
       });
+      await sendContextualUpdate('User started the conversation. Consider this for next response.');
     } catch (error) {
       console.error('Failed to start conversation:', error);
     } finally {

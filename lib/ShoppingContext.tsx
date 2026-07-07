@@ -35,7 +35,6 @@ export function ShoppingProvider({ children }: { children: ReactNode }) {
     const loadItems = async () => {
       try {
         const storedItems = await AsyncStorage.getItem('shoppingList');
-        console.log('storedItems', storedItems);
         if (storedItems) {
           setItems(JSON.parse(storedItems));
         } else {
