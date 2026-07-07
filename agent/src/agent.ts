@@ -83,7 +83,7 @@ export default defineAgent({
 
     const session = new voice.AgentSession({
       stt: new inference.STT({ model: 'deepgram/nova-3', language: 'en' }),
-      llm: new inference.LLM({ model: 'groq/llama-4-maverick' }),
+      llm: new inference.LLM({ model: 'google/gemini-2.5-flash' }),
       tts: new inference.TTS({ model: 'cartesia/sonic-3', voice: '79a125e8-cd45-4c13-8a67-188112f4dd22' }),
       vad: new inference.VAD(),
     });
