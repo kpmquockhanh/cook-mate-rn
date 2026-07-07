@@ -13,8 +13,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTimer, ActiveTimer } from '../../lib/TimerContext';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useRecipe } from '../../hooks/useRecipe';
-import * as Speech from 'expo-speech';
-import WebRTC from '../../components/WebRTC';
+import LiveKitVoice from '../../components/LiveKitVoice';
 import SoundWaves from '../../components/SoundWaves';
 
 export default function CookingPage() {
@@ -30,6 +29,9 @@ export default function CookingPage() {
   const [ingredients, setIngredients] = useState<any[]>([]);
   const [stepTimers, setStepTimers] = useState<{ [stepId: string]: string }>({});
   const [voiceEnabled, setVoiceEnabled] = useState(false);
+
+  const livekitUrl = process.env.EXPO_PUBLIC_LIVEKIT_URL || '';
+  const livekitToken = process.env.EXPO_PUBLIC_LIVEKIT_TOKEN || '';
 
   // Update ingredients when recipe data changes
   useEffect(() => {
@@ -56,26 +58,10 @@ export default function CookingPage() {
     }).start();
   }, [currentStep, recipeData?.instructions, progressAnim]);
 
-  // Voice synthesis function
-  const speak = (text: string, options?: Speech.SpeechOptions) => {
-    if (voiceEnabled) {
-      // Speech.speak(text, {
-      //   language: 'en',
-      //   pitch: 1.0,
-      //   rate: 1.0,
-      //   ...options
-      // });
-    }
-  };
-
-  // Repeat current step with voice
   const repeatCurrentStep = () => {
-    const instruction = currentStepData?.instruction_text || 'No instruction available';
-    speak(`Step ${currentStep + 1}: ${instruction}`);
   };
 
-  // Enhanced step navigation with voice feedback
-  const goToNextStep = (sendContextualUpdate?: (content: string) => Promise<void>) => {
+  const goToNextStep = () => {
     const steps = recipeData?.instructions || [];
     if (currentStep < steps.length - 1) {
       Animated.sequence([
@@ -92,12 +78,10 @@ export default function CookingPage() {
       ]).start();
 
       setCurrentStep(prev => prev + 1);
-    } else {
-      sendContextualUpdate?.("User has completed all steps! Great job! Consider this for next response.");
     }
   };
 
-  const goToPreviousStep = (sendContextualUpdate?: (content: string) => Promise<void>) => {
+  const goToPreviousStep = () => {
     if (currentStep > 0) {
       Animated.sequence([
         Animated.timing(stepTransitionAnim, {
@@ -113,9 +97,6 @@ export default function CookingPage() {
       ]).start();
 
       setCurrentStep(prev => prev - 1);
-    } else {
-    const instruction = currentStepData?.instruction_text || 'No instruction available';
-    sendContextualUpdate?.(`Current step is: ${instruction}. Consider this for next response.`);
     }
   };
 
@@ -208,8 +189,9 @@ export default function CookingPage() {
             {recipeData.title}
           </Text>
 
-          {/* Voice Control Toggle */}
-          <WebRTC
+          <LiveKitVoice
+            serverUrl={livekitUrl}
+            token={livekitToken}
             onNextStep={goToNextStep}
             onPreviousStep={goToPreviousStep}
             onRepeatStep={repeatCurrentStep}

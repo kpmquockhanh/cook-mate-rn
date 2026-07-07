@@ -41,7 +41,7 @@ The cooking app market is experiencing rapid growth ($2.4B by 2025), but user re
 
 **CookMate** introduces a revolutionary "Cooking Mode" experience that transforms the smartphone into an intelligent cooking assistant. The solution centers on:
 
-1. **Voice-First Interaction**: Hands-free operation using Porcupine wake word detection
+1. **Voice-First Interaction**: Hands-free operation using LiveKit AI voice agent with RPC tool forwarding
 2. **Intelligent Timer Orchestration**: Automatic coordination of multiple cooking processes
 3. **Real-Time Step Guidance**: Dynamic progression through recipe steps with voice prompts
 4. **Adaptive Cooking Flow**: Adjusts to user pace and provides recovery guidance
@@ -133,7 +133,7 @@ The cooking app market is experiencing rapid growth ($2.4B by 2025), but user re
 
 ### Core Features (Must Have)
 
-- **Voice-Activated Cooking Mode:** Hey Mate wake word detection with cooking-specific voice commands (next step, start timer, repeat instruction)
+- **Voice-Activated Cooking Mode:** LiveKit AI voice agent with cooking-specific voice commands (next step, start timer, repeat instruction) and natural conversation
 - **Intelligent Multi-Timer System:** Automatic timer creation from recipe steps with smart coordination and voice announcements
 - **Step-by-Step Cooking Guidance:** Clear, sequential instruction display with hands-free progression and ingredient highlighting
 - **Recipe Database:** Curated collection of 100+ recipes optimized for cooking mode with timing metadata
@@ -201,7 +201,7 @@ Transform CookMate into the definitive cooking companion that makes anyone capab
 
 - **Frontend:** React Native with Expo framework, NativeWind for styling
 - **Backend:** Supabase for authentication, database, and real-time features
-- **Voice Processing:** Porcupine by Picovoice for wake word detection and command processing
+- **Voice Processing:** LiveKit Agents framework with OpenAI STT/LLM/TTS pipeline, connected via WebRTC to the React Native client
 - **State Management:** React Context API with custom hooks
 - **Navigation:** Expo Router for file-based routing
 
@@ -224,7 +224,7 @@ Transform CookMate into the definitive cooking companion that makes anyone capab
 ### Key Assumptions
 
 - Users are comfortable with voice interaction in kitchen environments
-- Smartphone audio quality sufficient for reliable wake word detection
+- Smartphone audio quality sufficient for reliable voice agent interaction
 - Recipe timing metadata can be accurately estimated and standardized
 - Premium subscription model viable for cooking app market
 - Voice processing can work reliably in noisy kitchen environments
@@ -261,7 +261,7 @@ Transform CookMate into the definitive cooking companion that makes anyone capab
 ### A. Research Summary
 
 **Technology Research:**
-- Porcupine wake word detection: Proven reliable in noisy environments
+- LiveKit voice agents: Proven reliable in noisy environments with WebRTC resilience
 - React Native voice processing: Multiple successful implementations in production
 - Offline recipe storage: Standard practice for cooking apps
 

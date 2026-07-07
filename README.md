@@ -3,7 +3,7 @@
 Voice‑first, hands‑free cooking companion that orchestrates multi‑timers and step guidance to reduce stress and improve outcomes.
 
 ### Key Features (MVP)
-- **Wake‑word voice control**: “Hey Mate” with intents for next/prev/repeat step, start/pause/stop timers, remaining time, and custom durations.
+- **Voice‑first AI assistant**: LiveKit voice agent with intents for next/prev/repeat step, timer control, and cooking questions — talk naturally, no wake‑word needed.
 - **Intelligent multi‑timers**: Auto‑created from recipe metadata; orchestrates overlaps and announces near-completion.
 - **Guided Cooking Mode**: Adaptive step progression with ingredient callouts and concise instructions.
 - **Recipe catalog**: Curated set optimized for Cooking Mode; basic search/filter.

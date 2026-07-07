@@ -3,7 +3,7 @@
 ## Goals and Background Context
 
 ### Goals
-- Deliver a hands‑free Cooking Mode with reliable wake‑word voice control.
+- Deliver a hands‑free Cooking Mode with a LiveKit AI voice agent.
 - Orchestrate multiple cooking timers intelligently to reduce user stress.
 - Provide clear, adaptive step‑by‑step guidance that fits user pace.
 - Ship an MVP on iOS and Android within 6 months by a solo developer.
@@ -20,7 +20,7 @@ CookMate targets the core pain points of traditional recipe apps during actual c
 ## Requirements
 
 ### Functional (FR)
-1. FR1: Support wake‑word activation ("Hey Mate") while in Cooking Mode.
+1. FR1: Support voice agent connection ("Hey Mate" greeting) while in Cooking Mode.
 2. FR2: Recognize core voice intents: next/previous step, repeat, start/pause/stop timer <label>, remaining time, set custom timer <duration>, help.
 3. FR3: Auto‑create timers from recipe timing metadata and display them with labels.
 4. FR4: Orchestrate overlapping timers and propose optimal start times for dependent steps.
@@ -39,7 +39,7 @@ CookMate targets the core pain points of traditional recipe apps during actual c
 3. NFR3: Timer accuracy variance <2 seconds under backgrounding conditions.
 4. NFR4: Operate core flows offline (active steps, timers, selected recipes).
 5. NFR5: Accessibility: large tap targets, high‑contrast option, and voice‑only control path.
-6. NFR6: Privacy: process wake word/commands locally when feasible; comply with GDPR.
+6. NFR6: Privacy: stream audio securely via WebRTC to LiveKit server; comply with GDPR.
 7. NFR7: Maintain crash‑free sessions rate aligned with store rating ≥4.5.
 
 ## User Interface Design Goals
@@ -48,7 +48,7 @@ CookMate targets the core pain points of traditional recipe apps during actual c
 A calm, voice‑first cooking companion: minimal, high‑contrast step card; persistent timers panel; clear, short prompts designed for quick glance‑ability and hands‑free use.
 
 ### Key Interaction Paradigms
-- Wake‑word + short voice intents as primary control.
+- Voice toggle + natural voice intents as primary control.
 - Step card as the focal point; timers panel secondary but always accessible.
 - Contextual ingredient callouts within steps to avoid context switching.
 
@@ -80,11 +80,11 @@ Unit + Integration for timer logic, voice intent parsing, and step progression; 
 ### Additional Technical Assumptions and Requests
 - TypeScript, React Context + custom hooks for state.
 - Expo Router navigation; deep links for recipes.
-- Picovoice Porcupine for wake‑word and command processing.
+- LiveKit Agents for voice pipeline (STT/LLM/TTS) with RPC tool forwarding.
 - Local persistence for offline (SQLite/AsyncStorage via Expo APIs).
 
 ## Epic List
-1. Epic 1: Foundation & Voice POC – App setup, wake‑word prototype, canary Cooking Mode.
+1. Epic 1: Foundation & Voice POC – App setup, LiveKit voice agent prototype, canary Cooking Mode.
 2. Epic 2: Cooking Mode Core – Step guidance, voice intents, step progression.
 3. Epic 3: Multi‑Timer Orchestration – Auto‑timers, coordination, notifications.
 4. Epic 4: Recipe Catalog & Offline – Curated content, search, offline packs.
@@ -100,4 +100,4 @@ Unit + Integration for timer logic, voice intent parsing, and step progression; 
 "Create a minimal, high‑contrast, voice‑first Cooking Mode UX with a concise step card and persistent timers panel. Ensure hands‑free flows, contextual ingredient callouts, and an onboarding that secures mic/notification permissions with the least friction."
 
 ### Architect Prompt
-"Design an Expo RN + TypeScript app with Supabase backend and Picovoice wake‑word. Implement offline‑first caching, accurate background‑resilient timers, and local notifications. Provide modular state (Context + hooks), analytics instrumentation, and an architecture that supports incremental rollout of advanced orchestration."
+"Design an Expo RN + TypeScript app with Supabase backend and LiveKit voice agent. Implement offline‑first caching, accurate background‑resilient timers, and local notifications. Provide modular state (Context + hooks), analytics instrumentation, and an architecture that supports incremental rollout of advanced orchestration."

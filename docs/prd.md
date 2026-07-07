@@ -8,7 +8,7 @@
 
 **Problem**: Traditional recipe apps are static, require constant screen interaction with messy hands, offer poor timing coordination for concurrent tasks, and don’t adapt to the user’s pace.
 
-**Solution**: An interactive Cooking Mode with wake‑word voice control, intelligent multi‑timer orchestration, and adaptive, step‑by‑step guidance.
+**Solution**: An interactive Cooking Mode with a LiveKit AI voice agent, intelligent multi‑timer orchestration, and adaptive, step‑by‑step guidance.
 
 **Target platforms**: iOS (14+) and Android (API 23+) using React Native/Expo.
 
@@ -52,7 +52,7 @@
 ## 4. User Stories (Prioritized)
 
 Must‑have (MVP):
-- As a home cook, I can say a wake word to control the app hands‑free during cooking.
+- As a home cook, I can speak naturally to control the app hands‑free during cooking via the LiveKit voice agent.
 - As a user, I can follow a step‑by‑step guided flow for a recipe with clear instructions.
 - As a user, I can start, pause, and adjust multiple timers with voice commands.
 - As a user, I can ask to repeat the current step or go to the next step via voice.
@@ -67,7 +67,7 @@ Should‑have (post‑MVP candidates):
 ## 5. Functional Requirements (MVP)
 
 ### 5.1 Cooking Mode
-- Wake word detection (“Hey Mate”) always‑listening while in Cooking Mode
+- Toggle voice agent connection on/off while in Cooking Mode
 - Supported voice intents: next step, previous step, repeat, start/pause/stop timer <name|step>, remaining time, set custom timer <duration>, help
 - Step progression adapts to voice input and timer states
 - Visual step card with concise instruction and highlighted ingredients
@@ -95,7 +95,7 @@ Should‑have (post‑MVP candidates):
 - Voice command response <500ms
 - Offline: core cooking flow, active timers, step instructions available
 - Accessibility: large tap targets, high‑contrast option, voice‑only path
-- Privacy: process wake word/commands locally when possible; GDPR compliance
+- Privacy: stream audio to LiveKit server via WebRTC; GDPR compliance
 - Reliability: handle noisy kitchen environments; degrade gracefully
 
 ## 7. Scope for MVP
@@ -124,7 +124,7 @@ Out of scope:
 ## 9. Technical Architecture
 
 - Frontend: React Native + Expo; TypeScript; NativeWind for styling
-- Voice: Picovoice Porcupine for wake‑word + command processing
+- Voice: LiveKit Agents with OpenAI STT/LLM/TTS pipeline via WebRTC; RPC for tool forwarding
 - Backend: Supabase (auth, DB, real‑time); edge‑first API access
 - State: React Context + custom hooks; offline‑first data cache
 - Navigation: Expo Router; deep links for recipes
@@ -148,11 +148,11 @@ Out of scope:
 ## 12. Constraints & Assumptions
 - Solo developer; 6‑month MVP
 - Budget ~$50K
-- Kitchen noise is common; wake‑word must remain reliable
+- Kitchen noise is common; voice agent must remain reliable
 - Users accept voice in kitchen; smartphone mics are sufficient
 
 ## 13. Risks and Mitigations
-- Voice accuracy in noisy environments → choose robust wake‑word model; kitchen noise tests
+- Voice accuracy in noisy environments → use LiveKit's adaptive WebRTC with noise‑resilient STT; test in real kitchens
 - Multi‑timer complexity → start with deterministic orchestration; expand as validated
 - Adoption barrier for voice → provide quick tutorial and mixed‑mode controls
 - Competition replication → defensible orchestration UX and metadata pipeline
@@ -167,7 +167,7 @@ Out of scope:
 ## 15. Release Plan
 
 Milestones:
-- M0: POC wake‑word + sample recipe Cooking Mode
+- M0: POC voice agent + sample recipe Cooking Mode
 - M1: Multi‑timer orchestration v1; 20 curated recipes; offline cache
 - M2: Auth + sync; 60 recipes; onboarding + tutorial
 - M3 (MVP): 100+ recipes; analytics; polishing; TestFlight/Closed beta
