@@ -14,9 +14,9 @@
       "expo-router",
       "@livekit/react-native-expo-plugin",
       "@config-plugins/react-native-webrtc",
-      "react-native-worklets-core",
       "expo-secure-store",
-      "expo-web-browser"
+      "expo-web-browser",
+      "expo-font"
     ],
     "orientation": "portrait",
     "icon": "./assets/icon.png",
