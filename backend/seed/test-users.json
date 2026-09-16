@@ -1,0 +1,21 @@
+[
+  {
+    "email": "cook@cookmate.test",
+    "password": "CookMate!Test1",
+    "display_name": "Test Cook",
+    "metadata": { "seeded": true, "persona": "primary" }
+  },
+  {
+    "email": "second@cookmate.test",
+    "password": "CookMate!Test2",
+    "display_name": "Second Cook",
+    "metadata": { "seeded": true, "persona": "secondary" }
+  },
+  {
+    "email": "unconfirmed@cookmate.test",
+    "password": "CookMate!Test3",
+    "display_name": "Unconfirmed Cook",
+    "email_confirmed": false,
+    "metadata": { "seeded": true, "persona": "unconfirmed" }
+  }
+]

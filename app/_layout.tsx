@@ -1,11 +1,12 @@
-import { Stack } from 'expo-router';
 import { View, ActivityIndicator } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AuthProvider, useAuth } from '../lib/AuthContext';
 import { ShoppingProvider } from '../lib/ShoppingContext';
 import Auth from '../components/Auth';
 import '../global.css';
 import { TimerProvider } from '../lib/TimerContext';
+import RootStack from '../components/RootStack';
 
 function RootLayoutNav() {
   const { user, loading } = useAuth();
@@ -22,36 +23,21 @@ function RootLayoutNav() {
     return <Auth />;
   }
 
-  return (
-    <Stack
-      screenOptions={{
-        headerShown: false,
-        gestureEnabled: true,
-        animation: 'slide_from_right',
-      }}>
-      <Stack.Screen name="(tabs)" />
-      <Stack.Screen
-        name="cooking/[id]"
-        options={{
-          gestureEnabled: true,
-          animation: 'slide_from_right',
-        }}
-      />
-
-    </Stack>
-  );
+  return <RootStack />;
 }
 
 export default function RootLayout() {
   return (
-    <SafeAreaProvider>
-      <AuthProvider>
-        <ShoppingProvider>
-          <TimerProvider>
-            <RootLayoutNav />
-          </TimerProvider>
-        </ShoppingProvider>
-      </AuthProvider>
-    </SafeAreaProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SafeAreaProvider>
+        <AuthProvider>
+          <ShoppingProvider>
+            <TimerProvider>
+              <RootLayoutNav />
+            </TimerProvider>
+          </ShoppingProvider>
+        </AuthProvider>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }

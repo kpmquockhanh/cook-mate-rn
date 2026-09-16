@@ -42,7 +42,7 @@ export default function App() {
             <View className="mt-8 px-4">
               <View className="mb-4 flex-row items-center justify-between">
                 <Text className="text-2xl font-bold text-gray-800">Popular Recipes</Text>
-                <TouchableOpacity onPress={() => router.push('/(tabs)/all-recipes')}>
+                <TouchableOpacity onPress={() => router.push('/all-recipes')}>
                   <Text className="font-medium text-orange-500">See all</Text>
                 </TouchableOpacity>
               </View>
@@ -66,7 +66,7 @@ export default function App() {
             <View className="mt-6 px-4">
               <View className="mb-4 flex-row items-center justify-between">
                 <Text className="text-2xl font-bold text-gray-800">Featured Recipes</Text>
-                <TouchableOpacity onPress={() => router.push('/(tabs)/all-recipes')}>
+                <TouchableOpacity onPress={() => router.push('/all-recipes')}>
                   <Text className="font-medium text-orange-500">See all</Text>
                 </TouchableOpacity>
               </View>

@@ -1,0 +1,41 @@
+{
+  "name": "cookmate-backend",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "api": "tsx src/api/main.ts",
+    "api:dev": "tsx watch src/api/main.ts",
+    "setup": "tsx src/cli.ts setup",
+    "migrate": "tsx src/cli.ts migrate",
+    "seed": "tsx src/cli.ts seed-canonical",
+    "seed:auth": "tsx src/cli.ts seed-auth",
+    "enqueue": "tsx src/cli.ts enqueue",
+    "crawl": "tsx src/cli.ts crawl",
+    "parse": "tsx src/cli.ts parse",
+    "enrich": "tsx src/cli.ts enrich",
+    "gate": "tsx src/cli.ts gate",
+    "publish": "tsx src/cli.ts publish",
+    "review": "tsx src/cli.ts review",
+    "dev": "tsx src/cli.ts",
+    "pipeline": "tsx src/cli.ts pipeline",
+    "test": "tsx --test test/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.126.0",
+    "@fastify/cors": "^11.3.0",
+    "cheerio": "^1.0.0",
+    "dotenv": "^16.6.1",
+    "fastify": "^5.12.4",
+    "openai": "^6.49.0",
+    "pg": "^8.13.1",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/pg": "^8.11.10",
+    "tsx": "^4.19.0",
+    "typescript": "^5.8.0"
+  }
+}

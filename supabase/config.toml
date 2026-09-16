@@ -1,0 +1,13 @@
+# Supabase CLI config. Replace project_id with your project ref
+# (Dashboard > Project Settings > General > Reference ID), then:
+#
+#   supabase link --project-ref <ref>
+#   supabase secrets set LIVEKIT_URL=... LIVEKIT_API_KEY=... LIVEKIT_API_SECRET=...
+#   supabase functions deploy livekit-token
+project_id = "cookmate"
+
+[functions.livekit-token]
+# The app calls this with the user's Supabase session, and the room and
+# participant identity are derived from the verified user - never from the
+# request body. Leave this on.
+verify_jwt = true

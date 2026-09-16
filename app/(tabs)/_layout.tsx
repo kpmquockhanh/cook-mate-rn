@@ -10,6 +10,7 @@ export default function TabLayout() {
     <Tabs
       screenOptions={{
         headerShown: false,
+        animation: 'shift',
         tabBarActiveTintColor: '#FF6B6B',
         tabBarInactiveTintColor: '#999',
         tabBarStyle: {
@@ -98,22 +99,6 @@ export default function TabLayout() {
           tabBarIcon: ({ size, color }) => (
             <MaterialIcons size={size} name="settings" color={color} />
           ),
-        }}
-      />
-      <Tabs.Screen
-        name="all-recipes"
-        options={{
-          headerTitle: 'All recipes',
-          headerShown: false,
-          href: null, // This hides the tab from the tab bar
-        }}
-      />
-      <Tabs.Screen
-        name="recipe/[id]"
-        options={{
-          headerTitle: 'Recipe details',
-          headerShown: false,
-          href: null, // This hides the tab from the tab bar
         }}
       />
       </Tabs>

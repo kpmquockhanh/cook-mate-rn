@@ -1,7 +1,12 @@
 import { config } from 'dotenv';
 config();
 
-import { AccessToken } from 'livekit-server-sdk';
+import { AccessToken, RoomAgentDispatch, RoomConfiguration } from 'livekit-server-sdk';
+import { AGENT_NAME } from './constants.js';
+
+// Dev convenience only: prints a long-lived token for a single shared room.
+// Real sessions get a per-user token from the `livekit-token` Supabase edge
+// function (see supabase/functions/livekit-token/index.ts).
 
 const apiKey = process.env.LIVEKIT_API_KEY!;
 const apiSecret = process.env.LIVEKIT_API_SECRET!;
@@ -21,6 +26,17 @@ token.addGrant({
   room: 'cooking-room',
   canPublish: true,
   canSubscribe: true,
+  // The agent drives the app over RPC, which rides the data channel.
+  canPublishData: true,
+  // Required for localParticipant.setAttributes(), which is how the app tells
+  // the agent which recipe and step the user is on. Without it the agent runs
+  // blind.
+  canUpdateOwnMetadata: true,
+});
+
+// The worker uses explicit dispatch, so the token has to ask for it by name.
+token.roomConfig = new RoomConfiguration({
+  agents: [new RoomAgentDispatch({ agentName: AGENT_NAME })],
 });
 
 const jwt = await token.toJwt();

@@ -40,7 +40,7 @@ npm install # or yarn / pnpm i
 Create your env file(s):
 ```bash
 cp .env.example .env
-# Fill in SUPABASE_URL, SUPABASE_ANON_KEY, etc.
+# Fill in SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, etc.
 ```
 
 ### 3) Run the app

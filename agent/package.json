@@ -10,9 +10,9 @@
   },
   "dependencies": {
     "@livekit/agents": "^1.5.0",
+    "@livekit/rtc-node": "^0.13.30",
     "dotenv": "^16.6.1",
-    "livekit-server-sdk": "^2.15.0",
-    "zod": "^3.23.0"
+    "livekit-server-sdk": "^2.15.0"
   },
   "devDependencies": {
     "tsx": "^4.19.0",

@@ -9,5 +9,5 @@
       "~/*": ["src/*"]
     }
   },
-  "exclude": ["agent"]
+  "exclude": ["agent", "supabase", "backend"]
 }

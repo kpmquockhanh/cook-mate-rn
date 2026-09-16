@@ -1,0 +1,7 @@
+{
+  "//": "Edge functions run on Deno, not on the React Native TS config. The app's tsconfig excludes supabase/ so the two do not typecheck each other.",
+  "imports": {
+    "@supabase/supabase-js": "npm:@supabase/supabase-js@2",
+    "livekit-server-sdk": "npm:livekit-server-sdk@2"
+  }
+}
