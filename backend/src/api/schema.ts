@@ -37,9 +37,10 @@ export const ListQuery = z.object({
     ),
   order: z.enum(['asc', 'desc']).catch('desc'),
 
-  // app/(tabs)/all-recipes.tsx requests ITEMS_PER_PAGE * page, so this climbs
-  // as the user scrolls. The cap has to stay above what that reaches or
-  // `hasMore` (rows.length >= limit) goes false mid-list and paging stops.
+  // hooks/useRecipes.ts sends a fixed page size and walks `offset` forward, so
+  // this is one page, not a running total. It reads `hasMore` off
+  // rows.length >= limit, which means the server must never quietly return
+  // fewer rows than asked for while more exist.
   limit: z.coerce.number().int().min(1).max(200).catch(20),
   offset: z.coerce.number().int().min(0).catch(0),
 });

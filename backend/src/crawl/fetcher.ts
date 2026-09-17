@@ -28,7 +28,23 @@ export interface FetchResult {
   finalUrl: string;
 }
 
-export async function fetchPage(url: string, sourceDelayMs?: number): Promise<FetchResult> {
+export interface TextFetchResult {
+  status: number;
+  body: string | null;
+  contentType: string;
+  finalUrl: string;
+}
+
+/**
+ * Fetch a document of any type, through the same per-host gate as page fetches.
+ * Sitemaps are XML, so discovery cannot go through `fetchPage`, but it must
+ * still queue behind the crawl delay like every other request to that host.
+ */
+export async function fetchText(
+  url: string,
+  sourceDelayMs?: number,
+  accept = 'text/html,application/xhtml+xml',
+): Promise<TextFetchResult> {
   const host = new URL(url).hostname;
   const robots = await robotsFor(url);
   const delay = Math.max(
@@ -40,24 +56,32 @@ export async function fetchPage(url: string, sourceDelayMs?: number): Promise<Fe
   const response = await fetch(url, {
     headers: {
       'user-agent': env.userAgent,
-      accept: 'text/html,application/xhtml+xml',
+      accept,
       'accept-language': 'en-US,en;q=0.9',
     },
     redirect: 'follow',
     signal: AbortSignal.timeout(env.crawlTimeoutMs),
   });
 
+  const contentType = response.headers.get('content-type') ?? '';
+  const finalUrl = response.url || url;
+
   if (!response.ok) {
     log.warn(`${response.status} ${url}`);
-    return { status: response.status, html: null, finalUrl: response.url || url };
+    return { status: response.status, body: null, contentType, finalUrl };
   }
 
-  const contentType = response.headers.get('content-type') ?? '';
-  if (!contentType.includes('html')) {
-    return { status: response.status, html: null, finalUrl: response.url || url };
-  }
+  return { status: response.status, body: await response.text(), contentType, finalUrl };
+}
 
-  return { status: response.status, html: await response.text(), finalUrl: response.url || url };
+export async function fetchPage(url: string, sourceDelayMs?: number): Promise<FetchResult> {
+  const result = await fetchText(url, sourceDelayMs);
+  const isHtml = result.body !== null && result.contentType.includes('html');
+  return {
+    status: result.status,
+    html: isHtml ? result.body : null,
+    finalUrl: result.finalUrl,
+  };
 }
 
 /** Retry wrapper with exponential backoff; only retries transient failures. */

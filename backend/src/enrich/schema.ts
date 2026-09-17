@@ -34,6 +34,14 @@ export const EnrichmentSchema = z.object({
   difficulty: z.enum(['easy', 'medium', 'hard']),
   servings: z.number().int().nullable().describe('Servings if stated or clearly inferable, else null'),
   totalTimeSeconds: z.number().int().nullable(),
+  aiScore: z
+    .number()
+    .min(0)
+    .max(10)
+    .describe(
+      'Your own judgment of this recipe on a 0-10 scale, weighing clarity of instructions, ' +
+        'ingredient balance, and how appealing the result sounds. Not a copy of any rating in the source.',
+    ),
 });
 
 export type EnrichmentPayload = z.infer<typeof EnrichmentSchema>;

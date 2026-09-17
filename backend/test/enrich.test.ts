@@ -43,6 +43,7 @@ function payload(overrides: Partial<EnrichmentPayload> = {}): EnrichmentPayload 
     difficulty: 'easy',
     servings: 4,
     totalTimeSeconds: 1800,
+    aiScore: 7.5,
     ...overrides,
   };
 }
@@ -107,6 +108,12 @@ test('sanitize caps notes at three and falls back to the parsed hints', () => {
   assert.equal(result.notes.length, 3);
   assert.equal(result.servings, 4, 'falls back to the parsed servings hint');
   assert.equal(result.totalTimeSeconds, 1800);
+});
+
+test('sanitize clamps and rounds aiScore to one decimal', () => {
+  const result = sanitize(payload({ aiScore: 12.34 }), input());
+  assert.equal(result.aiScore, 10, 'clamped to the 0-10 band');
+  assert.equal(sanitize(payload({ aiScore: 6.28 }), input()).aiScore, 6.3);
 });
 
 test('the user message numbers ingredients and steps for index-based linking', () => {

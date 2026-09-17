@@ -1,0 +1,41 @@
+# Runs the backend API, the pipeline's operator console, and the voice agent.
+# The Expo app itself is not part of this: it's a mobile client (run via
+# `npm start` / Expo Go / a device build), not a service to containerize.
+#
+# Usage:
+#   cp backend/.env.example backend/.env   # fill in DATABASE_URL, provider keys,
+#                                           # SUPABASE_URL, REVIEW_USERNAME/PASSWORD
+#   cp agent/.env.example agent/.env       # fill in LIVEKIT_*
+#   docker compose up --build
+
+services:
+  api:
+    build: ./backend
+    command: ["npm", "run", "api"]
+    env_file: ./backend/.env
+    ports:
+      - "8787:8787"
+    restart: unless-stopped
+
+  crawler:
+    build: ./backend
+    command: ["npm", "run", "ui"]
+    env_file: ./backend/.env
+    environment:
+      # The console binds 127.0.0.1 by default, which is the container's own
+      # loopback interface - unreachable through the port mapping below even
+      # with it published. This opens it up instead, which is only safe
+      # because startConsole() refuses to run without REVIEW_USERNAME/
+      # REVIEW_PASSWORD (see backend/src/ui/server.ts).
+      REVIEW_HOST: "0.0.0.0"
+    ports:
+      - "5174:5174"
+    restart: unless-stopped
+
+  agent:
+    build: ./agent
+    command: ["npm", "run", "start"]
+    env_file: ./agent/.env
+    ports:
+      - "8082:8082"
+    restart: unless-stopped

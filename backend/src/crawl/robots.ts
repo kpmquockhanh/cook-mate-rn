@@ -3,10 +3,12 @@ import { logger } from '../log.js';
 
 const log = logger('robots');
 
-interface RobotsRules {
+export interface RobotsRules {
   disallow: string[];
   allow: string[];
   crawlDelayMs: number | null;
+  /** Absolute `Sitemap:` URLs. A non-group field, so it applies to every agent. */
+  sitemaps: string[];
 }
 
 const cache = new Map<string, Promise<RobotsRules>>();
@@ -17,7 +19,7 @@ const cache = new Map<string, Promise<RobotsRules>>();
  * which matches how the major crawlers behave, but a 4xx/5xx is logged.
  */
 async function loadRules(origin: string): Promise<RobotsRules> {
-  const rules: RobotsRules = { disallow: [], allow: [], crawlDelayMs: null };
+  const rules: RobotsRules = { disallow: [], allow: [], crawlDelayMs: null, sitemaps: [] };
   try {
     const response = await fetch(`${origin}/robots.txt`, {
       headers: { 'user-agent': env.userAgent },
@@ -37,6 +39,17 @@ async function loadRules(origin: string): Promise<RobotsRules> {
       if (separator === -1) continue;
       const field = clean.slice(0, separator).trim().toLowerCase();
       const value = clean.slice(separator + 1).trim();
+
+      // `Sitemap` is a non-group field: it belongs to the file, not to the
+      // user-agent block it happens to sit in, so it is read unconditionally.
+      if (field === 'sitemap') {
+        try {
+          rules.sitemaps.push(new URL(value, origin).toString());
+        } catch {
+          log.debug(`ignoring unparseable Sitemap entry in ${origin}/robots.txt: ${value}`);
+        }
+        continue;
+      }
 
       if (field === 'user-agent') {
         const agent = value.toLowerCase();

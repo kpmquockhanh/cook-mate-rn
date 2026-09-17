@@ -91,6 +91,23 @@ eas submit -p android
 
 ---
 
+## Backend & Agent (Docker)
+
+The recipe pipeline/API (`backend/`) and the voice agent (`agent/`) run as
+containers via the root `docker-compose.yml` — the Expo app itself stays a
+local/EAS build, not a container:
+
+```bash
+cp backend/.env.example backend/.env   # DATABASE_URL, provider keys, SUPABASE_URL,
+                                        # REVIEW_USERNAME/REVIEW_PASSWORD
+cp agent/.env.example agent/.env       # LIVEKIT_*
+docker compose up --build
+```
+
+This starts three services: the app API (`8787`), the pipeline's operator
+console (`5174`, HTTP Basic Auth via `REVIEW_USERNAME`/`REVIEW_PASSWORD`), and
+the voice agent worker. See `backend/README.md#docker` for details.
+
 ## Project Structure (high level)
 ```
 app/                 # Expo Router screens

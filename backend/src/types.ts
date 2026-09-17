@@ -55,6 +55,8 @@ export interface EnrichmentResult {
   difficulty: 'easy' | 'medium' | 'hard';
   servings: number | null;
   totalTimeSeconds: number | null;
+  /** The model's own 0-10 quality judgment, distinct from the scraped source rating. */
+  aiScore: number;
 }
 
 export interface StagingRow {

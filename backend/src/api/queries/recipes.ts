@@ -14,6 +14,7 @@ export const LIST_COLUMNS = [
   'cooking_time',
   'difficulty',
   'rating',
+  'ai_score',
   'review_count',
   'category',
   'cuisine',
@@ -36,6 +37,7 @@ export interface RecipeListRow {
   cooking_time: string | null;
   difficulty: string | null;
   rating: number | null;
+  ai_score: number | null;
   review_count: number;
   category: string | null;
   cuisine: string | null;

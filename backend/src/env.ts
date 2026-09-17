@@ -89,9 +89,29 @@ export const env = {
   crawlTimeoutMs: int('CRAWL_TIMEOUT_MS', 20000),
   qualityMinScore: int('QUALITY_MIN_SCORE', 70),
   reviewPort: int('REVIEW_PORT', 5174),
+  // 127.0.0.1 by default: the console has no business being reachable from
+  // outside the machine it runs on. Docker sets this to 0.0.0.0 because the
+  // container's loopback isn't reachable through a published port either way,
+  // which is exactly why REVIEW_USERNAME/REVIEW_PASSWORD are not optional.
+  reviewHost: process.env.REVIEW_HOST ?? '127.0.0.1',
+  // Basic Auth for the pipeline console (src/ui/server.ts). It can start
+  // crawls and spend model budget, so it is never served unauthenticated.
+  reviewUsername: process.env.REVIEW_USERNAME,
+  reviewPassword: process.env.REVIEW_PASSWORD,
 
   // ---- API (src/api) ----
   apiPort: int('API_PORT', 8787),
+
+  // ---- Auth (src/api/auth.ts) ----
+  // Project URL, e.g. https://PROJECT.supabase.co. It gives us both the JWKS
+  // endpoint for asymmetric signing keys and the expected `iss`. Optional only
+  // because a project still on the legacy HS256 secret needs the secret
+  // instead; the API refuses to boot with neither (see assertAuthConfigured).
+  supabaseUrl: process.env.SUPABASE_URL?.replace(/\/$/, ''),
+  // Legacy HS256 project JWT secret. Not the publishable key and not the
+  // service-role key - those are API keys, not signing material.
+  supabaseJwtSecret: process.env.SUPABASE_JWT_SECRET,
+
   // 0.0.0.0 so a phone running the Expo app can reach it over the LAN. The
   // review UI binds localhost on purpose; this one is meant to be called.
   apiHost: process.env.API_HOST ?? '0.0.0.0',

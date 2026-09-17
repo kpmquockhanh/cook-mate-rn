@@ -22,6 +22,7 @@ export const MAPPING = {
       servings: 'servings',
       difficulty: 'difficulty',
       rating: 'rating',
+      aiScore: 'ai_score',
       reviewCount: 'review_count',
       category: 'category',
       cuisine: 'cuisine',

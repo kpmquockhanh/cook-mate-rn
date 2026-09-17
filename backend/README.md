@@ -50,13 +50,54 @@ If you are pointing at a Supabase project that already had the app tables,
 
 ## Running it
 
+The console is the short path — `npm run ui` opens an operator UI at
+localhost:5174 that does everything below from a browser: point it at a site,
+watch it find the recipes, run each stage, and triage what comes out with a live
+log of what is happening.
+
 ```bash
+npm run ui                                      # the whole pipeline, in a browser
+```
+
+It is protected by HTTP Basic Auth — set `REVIEW_USERNAME`/`REVIEW_PASSWORD` in
+`.env` first, or it refuses to start (see [The console](#the-console)).
+
+Everything it does is also a command, because the console calls exactly the same
+functions the CLI does:
+
+```bash
+npm run discover -- https://example.com         # explore a site, queue what it finds
 npm run enqueue -- https://example.com/recipe   # or @urls.txt, one per line
 npm run dev -- sources                          # per-domain crawl/licence policy
 npm run pipeline -- --limit 50                  # crawl → parse → enrich → gate
-npm run review                                  # triage at localhost:5174
 npm run publish -- --limit 50                   # approved rows → app tables
 ```
+
+### Finding recipes without a URL list
+
+`discover` takes one link — a homepage, a category page, whatever you have — and
+works out the recipe URLs itself:
+
+```bash
+npm run discover -- https://example.com --dry-run          # look, write nothing
+npm run discover -- https://example.com --max-pages 80     # then do it for real
+npm run discover -- https://example.com --exclude '/(tag|author)/'
+```
+
+It reads the site's own sitemap when there is one (`Sitemap:` in robots.txt, or
+the usual paths), and otherwise walks links from the seed, preferring pages that
+might be recipes over navigation so the fetch budget is not spent on "About".
+Two things keep it honest:
+
+- **It is bounded.** `--max-pages` is a hard fetch budget, `--depth` limits how
+  far from the seed it will walk, `--max-results` caps what it returns.
+- **It is as polite as the crawler**, because it *is* the crawler: the same
+  robots.txt reader, the same per-host `Crawl-delay`, the same user agent.
+
+A page it fetched that turns out to be a recipe is written straight to
+`raw_pages` — discovery and crawling are one pass for those, so no source is
+asked for the same page twice. URLs it is confident about from their shape alone
+are queued without a fetch, for `crawl` to pick up.
 
 **If published recipes come back without images**, that is the source policy
 doing its job, not a crawl failure — the photos are in `recipe_staging`, and
@@ -68,7 +109,26 @@ npm run dev -- sources set example.com --allow-images --name "Example" --license
 npm run publish -- --republish                  # also rewrites status='published' rows
 ```
 
-Each stage is also a standalone command (`crawl`, `parse`, `enrich`, `gate`).
+Each stage is also a standalone command (`crawl`, `parse`, `enrich`, `gate`) and
+a button in the console.
+
+## Docker
+
+The `api` and `ui` (console) commands both run from `backend/Dockerfile`; see
+the repo root `docker-compose.yml` for how each service uses it, and the
+[voice agent's own image](../agent) for the third service it starts.
+
+```bash
+cp .env.example .env    # fill in DATABASE_URL, provider keys, SUPABASE_URL,
+                         # REVIEW_USERNAME/REVIEW_PASSWORD
+cd .. && docker compose up --build api crawler
+```
+
+The image installs `devDependencies` too and runs via `tsx`, matching how the
+package.json scripts already run — there's no separate compiled build. The
+`crawler` service sets `REVIEW_HOST=0.0.0.0` so its published port is
+reachable; that is only safe because the console refuses to start without
+`REVIEW_USERNAME`/`REVIEW_PASSWORD` set.
 
 ## The API
 
@@ -77,15 +137,48 @@ npm run api        # serve on :8787
 npm run api:dev    # same, restarting on change
 ```
 
-| Route | Notes |
-|-------|-------|
-| `GET /health` | Runs `select 1`; use it as a container healthcheck |
-| `GET /recipes` | `search`, `category`, `featured`, `popular`, `orderBy`, `order`, `limit`, `offset` |
-| `GET /recipes/:id` | Full detail with images, ingredients, instructions and notes. 404 when absent |
+| Route | Auth | Notes |
+|-------|------|-------|
+| `GET /health` | public | Runs `select 1`; use it as a container healthcheck |
+| `GET /recipes` | required | `search`, `category`, `featured`, `popular`, `orderBy`, `order`, `limit`, `offset` |
+| `GET /recipes/:id` | required | Full detail with images, ingredients, instructions and notes. 404 when absent |
 
 Both return `{ data: ... }`.
 
-Add these to your `.env` (they are optional — the defaults below apply):
+### Authentication
+
+Every route except `/health` requires the caller's Supabase access token:
+
+```
+Authorization: Bearer <session.access_token>
+```
+
+The app gets this for free — `lib/api.ts` attaches the token and retries once on
+a 401 against a refreshed session. For curl, take a token from a signed-in
+session or mint one for a seeded user (`npm run seed:auth`).
+
+The token is verified **locally** (`src/api/auth.ts`): signature, `iss`,
+`aud: authenticated` and expiry. There is no call to the auth server on the
+request path. Two signing schemes are accepted, resolved from the token header,
+so a project can rotate from one to the other without dropping live sessions:
+
+```bash
+SUPABASE_URL=https://PROJECT.supabase.co  # JWKS for ES256/RS256 keys + expected issuer
+SUPABASE_JWT_SECRET=...                   # only if the project still signs HS256
+```
+
+With neither set the API **refuses to start** rather than serving unauthenticated.
+
+A 401 body carries a `reason`: `missing_token`, `invalid_token`, or
+`token_expired`. Only the last one is worth retrying — it means refresh and try
+again, not sign the user out.
+
+The guard is a root-level `onRequest` hook registered before the routes, so a new
+route is authenticated by default. Making one public is a deliberate edit to
+`PUBLIC_ROUTES` in `src/api/auth.ts`, and route handlers read the caller from
+`request.user` (`requireUser(request)` narrows it).
+
+Other optional `.env` settings (defaults shown):
 
 ```bash
 API_PORT=8787
@@ -128,6 +221,32 @@ no re-crawling the internet.
 | 2 Enrich | `enrich` | One Claude call per recipe: durations, timer names, step↔ingredient indices |
 | 3 Gate | `gate` | Score 0–100, dedupe by fingerprint, route to `approved` / `review` / `rejected` |
 | 4 Publish | `publish` | Writes the app's exact wire shape; idempotent on `url_hash` |
+
+Stage 0 has a step in front of it that is optional but usually what you want:
+
+| Stage | Command | What it does |
+|---|---|---|
+| — Discover | `discover` | One seed URL → many recipe URLs, via sitemap or a bounded link walk |
+
+### The console
+
+`npm run ui` serves `src/ui/` on `REVIEW_PORT` (5174 by default): tabs for
+Discover, Add URLs, the crawl queue, per-domain source policy, the review queue
+and unmatched ingredients, plus a stage runner with a live log.
+
+Stage runs become **jobs** (`src/jobs/runner.ts`): they run in-process, stream
+their log lines to the page, and can be cancelled. Only one job per stage runs at
+a time, because two `crawl` runs would race for the same queue rows and two
+`enrich` runs would spend the model budget twice on the same staging rows. Jobs
+live in memory only — the pipeline's real state is in Postgres, so a restart
+costs you scrollback and nothing else.
+
+The console **binds to 127.0.0.1 by default and requires HTTP Basic Auth**
+(`REVIEW_USERNAME`/`REVIEW_PASSWORD`) on every request — it refuses to start
+without them, since anyone who can reach it can start crawls and spend model
+budget. `REVIEW_HOST` controls the bind address; only set it to something
+other than `127.0.0.1` (as the Docker image does — see [Docker](#docker))
+once real credentials are in place.
 
 ### Extraction tiers
 

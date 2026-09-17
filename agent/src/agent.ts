@@ -159,4 +159,16 @@ export default defineAgent({
   },
 });
 
-cli.runApp(new WorkerOptions({ agent: fileURLToPath(import.meta.url), agentName: AGENT_NAME }));
+// `npm run start` runs the worker in production mode, where @livekit/agents
+// defaults its health-check server to port 8081 - the same default port Expo
+// Metro uses. Pin it elsewhere so `agent` and `npm run web`/`expo start` can
+// run side by side without one stealing the other's port.
+const AGENT_HEALTH_PORT = Number(process.env.AGENT_PORT) || 8082;
+
+cli.runApp(
+  new WorkerOptions({
+    agent: fileURLToPath(import.meta.url),
+    agentName: AGENT_NAME,
+    port: AGENT_HEALTH_PORT,
+  })
+);

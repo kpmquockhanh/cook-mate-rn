@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -10,28 +10,29 @@ import {
 } from 'react-native';
 import { Container } from 'components/Container';
 import { StatusBar } from 'expo-status-bar';
-import { useRouter } from 'expo-router';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import RecipeCard from 'components/RecipeCard';
 import Search from 'components/Search';
 import { useRecipes, RecipeListItem } from 'hooks/useRecipes';
+import { goBack } from 'lib/navigationRoutes';
 
 const ITEMS_PER_PAGE = 10;
 
 export default function AllRecipes() {
-  const router = useRouter();
-  const [page, setPage] = useState(1);
   const [searchQuery, setSearchQuery] = useState('');
   const [refreshing, setRefreshing] = useState(false);
 
+  // useRecipes pages by offset and reloads the first page whenever `search`
+  // changes, so this screen only tracks the query itself.
   const {
     data: recipes,
     loading,
+    loadingMore,
     error,
     refetch,
-    hasMore,
+    loadMore,
   } = useRecipes({
-    limit: ITEMS_PER_PAGE * page,
+    limit: ITEMS_PER_PAGE,
     search: searchQuery,
     orderBy: 'created_at',
     order: 'desc',
@@ -39,28 +40,20 @@ export default function AllRecipes() {
 
   const handleSearch = useCallback((search: string) => {
     setSearchQuery(search);
-    setPage(1); // Reset to first page when searching
   }, []);
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
-    setPage(1);
     await refetch();
     setRefreshing(false);
   }, [refetch]);
-
-  const loadMore = useCallback(() => {
-    if (!loading && hasMore) {
-      setPage(prev => prev + 1);
-    }
-  }, [loading, hasMore]);
 
   const renderRecipe = useCallback(({ item }: { item: RecipeListItem }) => (
     <RecipeCard recipe={item} showHeart={true} />
   ), []);
 
   const renderFooter = () => {
-    if (!loading || !hasMore) return null;
+    if (!loadingMore) return null;
     return (
       <View style={styles.footerLoader}>
         <ActivityIndicator size="small" color="#FF6B6B" />
@@ -70,6 +63,11 @@ export default function AllRecipes() {
   };
 
   const renderEmpty = () => (
+    loading ? (
+      <View style={styles.emptyState}>
+        <ActivityIndicator size="large" color="#FF6B6B" />
+      </View>
+    ) : (
     <View style={styles.emptyState}>
       <MaterialIcons name="restaurant" size={64} color="#DDD" />
       <Text style={styles.emptyStateTitle}>
@@ -82,25 +80,23 @@ export default function AllRecipes() {
         }
       </Text>
     </View>
+    )
   );
 
   return (
     <>
       <Container>
         <View style={styles.header}>
-          <TouchableOpacity
-            style={styles.backButton}
-            onPress={() => router.back()}
-          >
+          <TouchableOpacity style={styles.backButton} onPress={() => goBack()}>
             <MaterialIcons name="arrow-back" size={24} color="#333" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>All Recipes</Text>
           <View style={styles.headerSpacer} />
         </View>
 
-        <View style={styles.searchContainer}>
-          <Search onSearch={handleSearch} />
-        </View>
+        {/* px-5 lines the bar up with the cards below it; the wrapper used to
+            add its own padding on top of the bar's. */}
+        <Search onSearch={handleSearch} containerClassName="px-5" />
 
         {error && (
           <View style={styles.errorContainer}>
@@ -143,13 +139,13 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 20,
+    paddingHorizontal: 12,
     paddingTop: 10,
-    paddingBottom: 20,
+    paddingBottom: 12,
   },
   backButton: {
     padding: 8,
-    marginRight: 8,
+    marginRight: 4,
   },
   headerTitle: {
     fontSize: 20,
@@ -160,12 +156,9 @@ const styles = StyleSheet.create({
   headerSpacer: {
     width: 40,
   },
-  searchContainer: {
-    paddingHorizontal: 20,
-    paddingBottom: 16,
-  },
   listContainer: {
     paddingHorizontal: 20,
+    paddingTop: 16,
     paddingBottom: 100,
   },
   footerLoader: {

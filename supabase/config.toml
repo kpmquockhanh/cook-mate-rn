@@ -4,7 +4,7 @@
 #   supabase link --project-ref <ref>
 #   supabase secrets set LIVEKIT_URL=... LIVEKIT_API_KEY=... LIVEKIT_API_SECRET=...
 #   supabase functions deploy livekit-token
-project_id = "cookmate"
+project_id = "iyrgvigfpwidydmatisd"
 
 [functions.livekit-token]
 # The app calls this with the user's Supabase session, and the room and

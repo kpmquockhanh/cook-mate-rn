@@ -1,0 +1,9 @@
+node_modules
+dist
+*.log
+.git
+
+# Secrets: passed in at runtime via env_file, never baked into the image.
+.env
+.env.*
+!.env.example

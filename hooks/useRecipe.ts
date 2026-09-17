@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+// apiFetch attaches the caller's Supabase access token; the API 401s without it.
+import { ApiError, apiFetch } from '../lib/api';
 
 export interface RecipeDetail {
   id: string | number;
@@ -8,6 +10,8 @@ export interface RecipeDetail {
   cookingTime: string;
   servings: number;
   rating: number;
+  /** AI-generated 0-10 quality score from enrichment, distinct from `rating`. */
+  aiScore?: number;
   reviewCount: number;
   isFavorite: boolean;
   ingredients: Ingredient[];
@@ -77,6 +81,7 @@ function mapDbRowToRecipeDetail(row: any): RecipeDetail {
     cookingTime: row.cooking_time ?? row.cookingTime ?? row.time ?? '30m',
     servings: row.servings ?? 4,
     rating: typeof row.rating === 'number' ? row.rating : 0,
+    aiScore: typeof row.ai_score === 'number' ? row.ai_score : undefined,
     reviewCount: row.review_count ?? row.reviewCount ?? 0,
     isFavorite: row.is_favorite ?? row.isFavorite ?? false,
     ingredients: Array.isArray(row.ingredients) ? row.ingredients.map((ing: any, index: number) => ({
@@ -132,23 +137,18 @@ export function useRecipe(options: UseRecipeOptions): UseRecipeResult {
     setError(null);
     
     try {
-      const apiBase = process.env.EXPO_PUBLIC_API_URL;
-      if (!apiBase) {
-        throw new Error('Missing EXPO_PUBLIC_API_URL');
-      }
-
-      const url = `${apiBase.replace(/\/$/, '')}/recipes/${id}`;
-      const response = await fetch(url, { method: 'GET' });
-
-      if (!response.ok) {
-        if (response.status === 404) {
+      let recipeData: unknown;
+      try {
+        recipeData = await apiFetch(`/recipes/${id}`, { method: 'GET' });
+      } catch (err) {
+        // Keep the copy the screen already shows for a missing recipe; every
+        // other failure (including a 401) keeps apiFetch's own message.
+        if (err instanceof ApiError && err.status === 404) {
           throw new Error('Recipe not found');
         }
-        throw new Error(`Request failed: ${response.status}`);
+        throw err;
       }
-      
-      const json = await response.json();
-      const recipeData = json?.data ?? json;
+
       if (!recipeData) {
         throw new Error('Invalid recipe data received');
       }

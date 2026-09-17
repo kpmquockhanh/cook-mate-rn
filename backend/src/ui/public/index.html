@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>CookMate Pipeline Console</title>
+<link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+
+<nav>
+  <h1>CookMate</h1>
+  <p class="sub">pipeline console</p>
+  <button data-view="pipeline" aria-current="page">Pipeline</button>
+  <button data-view="discover">Discover</button>
+  <button data-view="enqueue">Add URLs</button>
+  <button data-view="queue">Crawl queue <span class="count" data-count="queue"></span></button>
+  <button data-view="sources">Sources <span class="count" data-count="sources"></span></button>
+  <button data-view="review">Review <span class="count" data-count="review"></span></button>
+  <button data-view="unmatched">Unmatched <span class="count" data-count="unmatched"></span></button>
+</nav>
+
+<main id="main"><div class="empty">Loading…</div></main>
+
+<section id="drawer" class="collapsed" hidden>
+  <div id="drawer-bar">
+    <span class="dot" id="job-dot"></span>
+    <strong id="job-title">No job running</strong>
+    <span class="note" id="job-sub"></span>
+    <span class="spacer"></span>
+    <button class="btn small" id="job-cancel" hidden>Cancel</button>
+    <button class="btn small" id="drawer-toggle">Show log</button>
+  </div>
+  <pre id="log"></pre>
+</section>
+
+<script src="/app.js" type="module"></script>
+</body>
+</html>

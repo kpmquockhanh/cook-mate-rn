@@ -2,7 +2,7 @@ import { query, transaction } from '../db.js';
 import { env } from '../env.js';
 import { logger } from '../log.js';
 import { canonicalizeUrl, domainOf, sha256, urlHash } from '../util.js';
-import { extractRecipe } from './extract.js';
+import { type ExtractionOutcome, extractRecipe } from './extract.js';
 import { fetchWithRetry } from './fetcher.js';
 import { isAllowed } from './robots.js';
 
@@ -101,6 +101,86 @@ async function finish(id: number, status: 'done' | 'failed' | 'skipped', error?:
   );
 }
 
+interface StoredPage {
+  url: string;
+  hash: string;
+  sourceId: number | null;
+  httpStatus: number;
+  html: string;
+}
+
+/**
+ * The one place a fetched page becomes an immutable raw_pages row. Both the
+ * queue worker below and discovery (which fetches candidate pages in order to
+ * decide whether they are recipes at all) land here, so the extraction tier and
+ * the content hash are computed identically no matter who did the fetching.
+ */
+async function storeRawPage(page: StoredPage): Promise<ExtractionOutcome> {
+  const outcome = extractRecipe(page.html, page.url);
+
+  await query(
+    `insert into crawler.raw_pages
+       (url, url_hash, source_id, http_status, content_hash, html, extracted, extractor)
+     values ($1, $2, $3, $4, $5, $6, $7, $8)
+     on conflict (url_hash, content_hash) do update
+        set extracted = excluded.extracted, extractor = excluded.extractor, fetched_at = now()`,
+    [
+      page.url,
+      page.hash,
+      page.sourceId,
+      page.httpStatus,
+      sha256(page.html),
+      page.html,
+      outcome.recipe ? JSON.stringify(outcome.recipe) : null,
+      outcome.extractor,
+    ],
+  );
+
+  return outcome;
+}
+
+/**
+ * Record a page some other stage has already downloaded, as if `crawl` had
+ * fetched it: a queue row in its terminal state plus the raw page. Discovery
+ * uses this so the HTML it had to download anyway is not thrown away and then
+ * requested a second time from the same source.
+ *
+ * Returns whether the page actually carried recipe markup.
+ */
+export async function ingestFetchedPage(
+  rawUrl: string,
+  html: string,
+  httpStatus: number,
+): Promise<boolean> {
+  const url = canonicalizeUrl(rawUrl);
+  const hash = urlHash(url);
+  const source = await ensureSource(url);
+
+  await query(
+    `insert into crawler.crawl_queue (url, url_hash, source_id, status, attempts, locked_at)
+     values ($1, $2, $3, 'fetching', 1, now())
+     on conflict (url_hash) do nothing`,
+    [url, hash, source.id],
+  );
+
+  const { recipe } = await storeRawPage({
+    url,
+    hash,
+    sourceId: source.id,
+    httpStatus,
+    html,
+  });
+
+  await query(
+    `update crawler.crawl_queue
+        set status = $2, last_error = $3, finished_at = now()
+      where url_hash = $1`,
+    [hash, recipe ? 'done' : 'failed', recipe ? null : 'no recipe markup (tiers A/B/C all missed)'],
+  );
+
+  return recipe !== null;
+}
+
 async function crawlOne(item: QueueRow, delays: Map<number, number>): Promise<boolean> {
   if (!(await isAllowed(item.url))) {
     log.info(`robots.txt disallows ${item.url}`);
@@ -114,26 +194,13 @@ async function crawlOne(item: QueueRow, delays: Map<number, number>): Promise<bo
     return false;
   }
 
-  const { recipe, extractor } = extractRecipe(result.html, item.url);
-  const contentHash = sha256(result.html);
-
-  await query(
-    `insert into crawler.raw_pages
-       (url, url_hash, source_id, http_status, content_hash, html, extracted, extractor)
-     values ($1, $2, $3, $4, $5, $6, $7, $8)
-     on conflict (url_hash, content_hash) do update
-        set extracted = excluded.extracted, extractor = excluded.extractor, fetched_at = now()`,
-    [
-      item.url,
-      item.url_hash,
-      item.source_id,
-      result.status,
-      contentHash,
-      result.html,
-      recipe ? JSON.stringify(recipe) : null,
-      extractor,
-    ],
-  );
+  const { recipe, extractor } = await storeRawPage({
+    url: item.url,
+    hash: item.url_hash,
+    sourceId: item.source_id,
+    httpStatus: result.status,
+    html: result.html,
+  });
 
   if (!recipe) {
     log.warn(`no recipe markup found: ${item.url}`);

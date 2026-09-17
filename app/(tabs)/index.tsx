@@ -13,10 +13,9 @@ export default function App() {
   const popular = useRecipes({ popular: true, limit: 5 });
   const featured = useRecipes({ featured: true, limit: 5 });
 
-  const onSearch = (search: string) => {
-    popular.refetch({ search });
-    featured.refetch({ search });
-  };
+  // The home bar is only an entry point: tapping it hands off to the search
+  // screen, which owns the keyboard and the results.
+  const openSearch = () => router.push('/search');
 
   const EmptyState = ({ title }: { title: string }) => (
     <View className="py-8 items-center">
@@ -33,7 +32,7 @@ export default function App() {
             <HeaderSection />
 
             {/* Search Section */}
-            <Search onSearch={onSearch} />
+            <Search onPress={openSearch} />
 
             {/* Categories */}
             {/* <Categories /> */}
@@ -51,7 +50,7 @@ export default function App() {
               )}
               {popular.loading ? (
                 <View className="py-4 items-center">
-                  <ActivityIndicator />
+                  <ActivityIndicator size="large" color="#ff6b6b" />
                 </View>
               ) : popular.data.length > 0 ? (
                 popular.data.map((recipe: any) => (
@@ -75,7 +74,7 @@ export default function App() {
               )}
               {featured.loading ? (
                 <View className="py-4 items-center">
-                  <ActivityIndicator />
+                  <ActivityIndicator size="large" color="#ff6b6b" />
                 </View>
               ) : featured.data.length > 0 ? (
                 featured.data.map((recipe: any) => (

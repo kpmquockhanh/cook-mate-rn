@@ -4,6 +4,7 @@ import { ZodError } from 'zod';
 import { query } from '../db.js';
 import { env } from '../env.js';
 import { logger } from '../log.js';
+import { registerAuth } from './auth.js';
 import { recipeRoutes } from './routes/recipes.js';
 
 const log = logger('api');
@@ -21,11 +22,6 @@ export async function buildServer(): Promise<FastifyInstance> {
   // boilerplate. Lock the origin down in production via API_CORS_ORIGIN.
   await app.register(cors, { origin: env.apiCorsOrigin });
 
-  app.get('/health', async () => {
-    await query('select 1');
-    return { ok: true };
-  });
-
   // These must come BEFORE the routes are registered. `await app.register()`
   // boots the plugin straight away, and the child context captures whichever
   // error handler is in force at that moment - set it after and it silently
@@ -42,6 +38,18 @@ export async function buildServer(): Promise<FastifyInstance> {
 
   app.setNotFoundHandler((_request, reply) => {
     reply.code(404).send({ error: 'Not found' });
+  });
+
+  // Before the routes, not after: this installs a root-level onRequest hook, and
+  // only the child contexts registered after it inherit the hook. Registering a
+  // route above this line would silently leave it unauthenticated.
+  registerAuth(app);
+
+  // Public by design (see PUBLIC_ROUTES in auth.ts) - a load balancer probe has
+  // no session to present, and it reveals nothing beyond "the database answers".
+  app.get('/health', async () => {
+    await query('select 1');
+    return { ok: true };
   });
 
   await app.register(recipeRoutes);

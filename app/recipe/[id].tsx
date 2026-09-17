@@ -23,6 +23,7 @@ import { useShopping } from '../../lib/ShoppingContext';
 import { Note, useRecipe, type Ingredient } from '../../hooks/useRecipe';
 import { getImageUrl } from '../../utils/index';
 import { LinearGradient } from 'expo-linear-gradient';
+import { WEB_MOBILE_MAX_WIDTH } from '../_layout';
 
 /**
  * NativeWind only registers a fixed list of react-native components for web
@@ -39,7 +40,13 @@ export default function RecipeDetailPage() {
   // Must be reactive, not a module-scope Dimensions snapshot: on web that
   // snapshot is taken once and a resized window then leaves the hero wider
   // than its container, which pushes every row's right edge out of view.
-  const { width } = useWindowDimensions();
+  const { width: windowWidth } = useWindowDimensions();
+  // On web, useWindowDimensions() reports the full browser window, not the
+  // phone-width column the root layout clamps the app to (see
+  // WEB_MOBILE_MAX_WIDTH in _layout.tsx). Without this the hero image's
+  // height scaled off the raw window width and filled the whole screen on
+  // a wide desktop browser.
+  const width = Platform.OS === 'web' ? Math.min(windowWidth, WEB_MOBILE_MAX_WIDTH) : windowWidth;
   // Tall enough that the scrimmed title block at the bottom has room to
   // breathe without pushing the first real content off-screen on a small phone.
   const heroHeight = Math.max(300, Math.round(width * 0.78));
@@ -345,6 +352,7 @@ export default function RecipeDetailPage() {
 
   const description = typeof recipeData.description === 'string' ? recipeData.description : '';
   const difficulty = typeof recipeData.difficulty === 'string' ? recipeData.difficulty : '';
+  const aiScore = typeof recipeData.aiScore === 'number' ? recipeData.aiScore : undefined;
   const cuisine = typeof recipeData.cuisine === 'string' ? recipeData.cuisine : '';
   const category = typeof recipeData.category === 'string' ? recipeData.category : '';
   const sourceName = typeof recipeData.source_name === 'string' ? recipeData.source_name : '';
@@ -469,6 +477,20 @@ export default function RecipeDetailPage() {
             </Text>
             <Text className="text-xs text-gray-400">Difficulty</Text>
           </View>
+
+          {aiScore !== undefined && (
+            <>
+              <View className="w-px bg-gray-100" />
+
+              <View className="flex-1 items-center">
+                <Ionicons name="sparkles-outline" size={22} color="#ff6b6b" />
+                <Text className="mt-1 text-sm font-semibold text-gray-800">
+                  {aiScore.toFixed(1)}
+                </Text>
+                <Text className="text-xs text-gray-400">AI Score</Text>
+              </View>
+            </>
+          )}
         </View>
 
         {description ? (

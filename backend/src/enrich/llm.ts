@@ -18,6 +18,7 @@ Rules:
 - timerName is an imperative of at most 3 words ("Simmer sauce", "Rest dough"). It is null exactly when durationSeconds is null.
 - Return one entry per input step, with its original index. Do not merge, split, reorder, or add steps.
 - notes are your own short practical tips (max 3). Do not copy the source's prose.
+- aiScore is your own 0-10 judgment of the recipe's quality (clarity, ingredient balance, appeal). Base it only on the recipe itself, never on any rating present in the source.
 - Never invent ingredients, steps, or times that the input does not support.`;
 
 export interface EnrichInput {
@@ -85,6 +86,10 @@ function sanitize(payload: EnrichmentPayload, input: EnrichInput): EnrichmentRes
     difficulty: payload.difficulty,
     servings: payload.servings ?? input.servingsHint,
     totalTimeSeconds: payload.totalTimeSeconds ?? input.totalTimeHint,
+    // Schema already enforces 0-10, but a provider without constrained
+    // decoding can still hand back e.g. 9.97; round to the precision the
+    // DB column and UI actually display.
+    aiScore: Math.round(Math.min(10, Math.max(0, payload.aiScore)) * 10) / 10,
   };
 }
 

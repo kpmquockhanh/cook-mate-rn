@@ -79,3 +79,6 @@ coverage/
 ## Bmad
 .bmad-core/
 
+## Supabase CLI local state
+supabase/.temp/
+

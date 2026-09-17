@@ -1,9 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  View,
-  TouchableOpacity,
-  Text,
-} from 'react-native';
+import { View, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import {
   registerGlobals,
@@ -13,15 +9,22 @@ import {
   LiveKitRoom,
   useVoiceAssistant,
 } from '@livekit/react-native';
+import type { MediaDeviceFailure } from 'livekit-client';
 import {
   COOKING_STATE_ATTRIBUTE,
   serializeCookingState,
   type CookingState,
 } from '../lib/cookingContext';
+import {
+  describeVoiceStatus,
+  voiceControlIcon,
+  type VoiceSessionStatus,
+} from '../lib/voiceSession';
+import { errorMessage, logger } from '../lib/log';
 
 registerGlobals();
 
-type VoiceStatus = 'idle' | 'connecting' | 'connected' | 'no-agent' | 'error';
+const log = logger('voice');
 
 /**
  * How long to wait for the agent worker to join before telling the user. The
@@ -45,35 +48,77 @@ interface LiveKitVoiceProps {
   onNextStep?: StepCallback;
   onPreviousStep?: StepCallback;
   onRepeatStep?: StepCallback;
-  onStarted?: () => void;
-  onEnded?: () => void;
-  /** Fires when the agent worker joins or is found to be absent. */
-  onAgentAvailabilityChange?: (available: boolean) => void;
+  /**
+   * Every state change, with the underlying reason when the state is a failure.
+   * The cooking screen is what turns this into a line the user can read.
+   */
+  onStatusChange?: (status: VoiceSessionStatus, detail: string | null) => void;
 }
 
-function RoomView({ cookingState, onNextStep, onPreviousStep, onRepeatStep, onAgentPresence }: {
+/** Session state and, for a failure, why - always changed together. */
+interface Session {
+  status: VoiceSessionStatus;
+  detail: string | null;
+}
+
+const READY: Session = { status: 'ready', detail: null };
+
+/** States a live room can be torn down from, as opposed to a failure to keep. */
+function isLive(status: VoiceSessionStatus): boolean {
+  return status === 'connecting' || status === 'listening' || status === 'no-agent';
+}
+
+/**
+ * Renders nothing. It exists so the room hooks have a subscriber inside the
+ * LiveKitRoom context; everything it learns is reported upwards, because the
+ * one control this component owns is drawn by the parent. It used to draw a
+ * second icon of its own, which the cooking screen's 44pt header circle then
+ * had to hold alongside the toggle.
+ */
+function RoomView({
+  cookingState,
+  onNextStep,
+  onPreviousStep,
+  onRepeatStep,
+  onAgentPresence,
+  onAgentSpeaking,
+}: {
   cookingState?: CookingState | null;
   onNextStep?: StepCallback;
   onPreviousStep?: StepCallback;
   onRepeatStep?: StepCallback;
   onAgentPresence?: (present: boolean) => void;
+  onAgentSpeaking?: (speaking: boolean) => void;
 }) {
   const room = useRoomContext();
   const { localParticipant } = useLocalParticipant();
   const { state, agent } = useVoiceAssistant();
   const agentSpeaking = state === 'speaking';
   const agentPresent = !!agent;
+  const agentIdentity = agent?.identity;
+
+  useEffect(() => {
+    onAgentSpeaking?.(agentSpeaking);
+  }, [agentSpeaking, onAgentSpeaking]);
 
   // Report presence immediately, absence only after a grace period - the worker
   // takes a moment to be dispatched and join.
   useEffect(() => {
     if (agentPresent) {
+      log.info(`Agent joined the room as ${agentIdentity ?? 'unknown'}`);
       onAgentPresence?.(true);
       return;
     }
-    const timer = setTimeout(() => onAgentPresence?.(false), AGENT_JOIN_TIMEOUT_MS);
+    const timer = setTimeout(() => {
+      log.warn(
+        `No agent joined within ${AGENT_JOIN_TIMEOUT_MS / 1000}s in room ${room.name}. Check that ` +
+          'the worker is running (cd agent && npm install && npm run dev) and that its AGENT_NAME ' +
+          "matches the token's agent dispatch."
+      );
+      onAgentPresence?.(false);
+    }, AGENT_JOIN_TIMEOUT_MS);
     return () => clearTimeout(timer);
-  }, [agentPresent, onAgentPresence]);
+  }, [agentPresent, agentIdentity, room.name, onAgentPresence]);
 
   // Publish the current recipe and step to the agent. This runs on connect and
   // on every step change - including manual taps - so the agent never narrates
@@ -83,7 +128,7 @@ function RoomView({ cookingState, onNextStep, onPreviousStep, onRepeatStep, onAg
     if (!serializedState) return;
     localParticipant
       .setAttributes({ [COOKING_STATE_ATTRIBUTE]: serializedState })
-      .catch((e: unknown) => console.error('[LiveKit] Failed to publish cooking state:', e));
+      .catch((e: unknown) => log.error('Failed to publish cooking state', e));
   }, [localParticipant, serializedState]);
 
   // Keep the latest callbacks in a ref so the RPC methods are registered once
@@ -93,15 +138,32 @@ function RoomView({ cookingState, onNextStep, onPreviousStep, onRepeatStep, onAg
   handlers.current = { onNextStep, onPreviousStep, onRepeatStep };
 
   useEffect(() => {
-    room.registerRpcMethod('navigate_next', async () => {
-      return handlers.current.onNextStep?.() || 'Moved to the next step';
-    });
-    room.registerRpcMethod('navigate_back', async () => {
-      return handlers.current.onPreviousStep?.() || 'Moved to the previous step';
-    });
-    room.registerRpcMethod('repeat_step', async () => {
-      return handlers.current.onRepeatStep?.() || 'Repeated the current step';
-    });
+    // The agent reads the returned string aloud, so a throw here becomes an
+    // unexplained apology in the user's ear. Log it, answer with something
+    // sayable.
+    const rpc = (name: string, run: () => string | void, fallback: string) => async () => {
+      try {
+        const result = run() || fallback;
+        log.info(`RPC ${name} -> ${result}`);
+        return result;
+      } catch (e) {
+        log.error(`RPC ${name} failed`, e);
+        return `Sorry, I could not do that: ${errorMessage(e, 'something went wrong')}`;
+      }
+    };
+
+    room.registerRpcMethod(
+      'navigate_next',
+      rpc('navigate_next', () => handlers.current.onNextStep?.(), 'Moved to the next step')
+    );
+    room.registerRpcMethod(
+      'navigate_back',
+      rpc('navigate_back', () => handlers.current.onPreviousStep?.(), 'Moved to the previous step')
+    );
+    room.registerRpcMethod(
+      'repeat_step',
+      rpc('repeat_step', () => handlers.current.onRepeatStep?.(), 'Repeated the current step')
+    );
 
     return () => {
       room.unregisterRpcMethod('navigate_next');
@@ -110,20 +172,7 @@ function RoomView({ cookingState, onNextStep, onPreviousStep, onRepeatStep, onAg
     };
   }, [room]);
 
-  return (
-    <View style={{ alignItems: 'center' }}>
-      <Ionicons
-        name={agentSpeaking ? 'volume-high' : 'mic'}
-        size={24}
-        color={agentSpeaking ? '#4ECDC4' : '#FFFFFF'}
-      />
-      {agentSpeaking && (
-        <Text style={{ color: '#FFFFFF', fontSize: 10, marginTop: 2 }}>
-          AI speaking
-        </Text>
-      )}
-    </View>
-  );
+  return null;
 }
 
 const LiveKitVoice: React.FC<LiveKitVoiceProps> = ({
@@ -133,93 +182,98 @@ const LiveKitVoice: React.FC<LiveKitVoiceProps> = ({
   onNextStep,
   onPreviousStep,
   onRepeatStep,
-  onStarted,
-  onEnded,
-  onAgentAvailabilityChange,
+  onStatusChange,
 }) => {
-  const [status, setStatus] = useState<VoiceStatus>('idle');
+  const [session, setSession] = useState<Session>(READY);
+  const [agentSpeaking, setAgentSpeaking] = useState(false);
   const [connect, setConnect] = useState(false);
   const audioStarted = useRef(false);
 
-  // onDisconnected also fires as the room unmounts, so without this a manual
-  // stop would report the session ended twice.
-  const endedEmitted = useRef(true);
-  const emitEnded = useCallback(() => {
-    if (endedEmitted.current) return;
-    endedEmitted.current = true;
-    onEnded?.();
-  }, [onEnded]);
+  // One place reports every transition, so the screen's banner and the logs can
+  // never disagree about what the session is doing. The ref holds the callback
+  // so that a parent re-render cannot re-fire the report; it is refreshed in an
+  // effect declared first, which therefore runs before the reporting one in the
+  // same commit.
+  const reportRef = useRef(onStatusChange);
+  useEffect(() => {
+    reportRef.current = onStatusChange;
+  });
+  useEffect(() => {
+    log.info(`Status -> ${session.status}${session.detail ? `: ${session.detail}` : ''}`);
+    reportRef.current?.(session.status, session.detail);
+  }, [session]);
 
-  const handleAgentPresence = useCallback(
-    (present: boolean) => {
-      onAgentAvailabilityChange?.(present);
-      // Only a live session can flip between these two; leave any other status
-      // (connecting, error, idle) alone.
-      setStatus((current) =>
-        current === 'connected' || current === 'no-agent'
-          ? present
-            ? 'connected'
-            : 'no-agent'
-          : current
-      );
-    },
-    [onAgentAvailabilityChange]
-  );
+  const fail = useCallback((status: VoiceSessionStatus, detail: string) => {
+    setConnect(false);
+    setAgentSpeaking(false);
+    setSession({ status, detail });
+  }, []);
 
   const startAudio = useCallback(async () => {
     if (audioStarted.current) return;
-    try {
-      await AudioSession.startAudioSession();
-      audioStarted.current = true;
-    } catch (e) {
-      console.error('[LiveKit] Audio session error:', e);
-    }
+    await AudioSession.startAudioSession();
+    audioStarted.current = true;
   }, []);
 
   const stopAudio = useCallback(async () => {
     if (!audioStarted.current) return;
+    audioStarted.current = false;
     try {
       await AudioSession.stopAudioSession();
-      audioStarted.current = false;
     } catch (e) {
-      console.error('[LiveKit] Audio session stop error:', e);
+      log.error('Audio session stop error', e);
     }
   }, []);
 
   useEffect(() => {
-    return () => { stopAudio(); };
+    return () => {
+      void stopAudio();
+    };
   }, [stopAudio]);
 
+  const handleAgentPresence = useCallback((present: boolean) => {
+    setSession((current) => {
+      if (current.status !== 'listening' && current.status !== 'no-agent') return current;
+      const status: VoiceSessionStatus = present ? 'listening' : 'no-agent';
+      return current.status === status ? current : { status, detail: null };
+    });
+  }, []);
+
   const handleToggle = useCallback(async () => {
-    if (status === 'idle' || status === 'error') {
-      endedEmitted.current = false;
-      setStatus('connecting');
-      await startAudio();
-      setConnect(true);
-    } else if (status === 'connected' || status === 'no-agent') {
+    if (session.status === 'connecting') return;
+
+    if (isLive(session.status)) {
       setConnect(false);
-      setStatus('idle');
+      setAgentSpeaking(false);
       await stopAudio();
-      emitEnded();
+      setSession(READY);
+      return;
     }
-  }, [status, startAudio, stopAudio, emitEnded]);
+
+    // 'ready', and the retry path out of 'error' / 'mic-denied'.
+    setSession({ status: 'connecting', detail: null });
+    try {
+      await startAudio();
+    } catch (e) {
+      // startAudioSession is where a denied microphone surfaces on iOS.
+      log.error('Could not start the audio session', e);
+      fail('mic-denied', errorMessage(e, 'The microphone is unavailable'));
+      return;
+    }
+    setConnect(true);
+  }, [session.status, startAudio, stopAudio, fail]);
+
+  const copy = describeVoiceStatus(session.status, session.detail);
+  const control = voiceControlIcon(session.status, agentSpeaking);
 
   return (
     <View>
-      <TouchableOpacity onPress={handleToggle}>
-        {status === 'idle' ? (
-          <Ionicons name="volume-mute-outline" size={24} color="white" />
-        ) : status === 'connecting' ? (
-          <Ionicons name="ellipsis-horizontal-sharp" size={24} color="white" />
-        ) : status === 'connected' ? (
-          <Ionicons name="volume-high-outline" size={24} color="white" />
-        ) : status === 'no-agent' ? (
-          // Connected to the room, but no worker joined - not the same as a
-          // connection error, and worth telling the user apart from success.
-          <Ionicons name="cloud-offline-outline" size={24} color="#FDE68A" />
-        ) : (
-          <Ionicons name="alert-circle-outline" size={24} color="#FCA5A5" />
-        )}
+      <TouchableOpacity
+        onPress={handleToggle}
+        accessibilityRole="button"
+        accessibilityLabel={copy.label}
+        accessibilityState={{ disabled: session.status === 'connecting' }}>
+        <Ionicons name={control.name} size={24} color={control.color} />
       </TouchableOpacity>
 
       {connect && (
@@ -230,29 +284,40 @@ const LiveKitVoice: React.FC<LiveKitVoiceProps> = ({
           audio={true}
           video={false}
           onConnected={() => {
-            setStatus('connected');
-            onStarted?.();
+            // Presence is unknown for a beat after joining. Assume the worker is
+            // on its way rather than flashing "no assistant" on every connect;
+            // RoomView downgrades this if nothing turns up.
+            setSession({ status: 'listening', detail: null });
           }}
           onDisconnected={() => {
-            setStatus('idle');
-            emitEnded();
+            setConnect(false);
+            setAgentSpeaking(false);
+            void stopAudio();
+            // Unmounting after a failure also lands here - keep the reason.
+            setSession((current) => (isLive(current.status) ? READY : current));
           }}
           onError={(err: Error) => {
-            console.error('[LiveKit] Room error:', err);
-            setStatus('error');
-            setConnect(false);
-            emitEnded();
+            log.error('Room error', err);
+            void stopAudio();
+            fail('error', errorMessage(err, 'Could not reach the voice service'));
+          }}
+          onMediaDeviceFailure={(failure?: MediaDeviceFailure) => {
+            // Without this the room stays happily connected while the agent
+            // hears silence, which reads to the user as the AI ignoring them.
+            log.error(`Microphone failure: ${failure ?? 'unknown'}`);
+            void stopAudio();
+            fail('mic-denied', `Microphone unavailable (${failure ?? 'unknown'})`);
           }}
           options={{
             adaptiveStream: { pixelDensity: 'screen' },
-          }}
-        >
+          }}>
           <RoomView
             cookingState={cookingState}
             onNextStep={onNextStep}
             onPreviousStep={onPreviousStep}
             onRepeatStep={onRepeatStep}
             onAgentPresence={handleAgentPresence}
+            onAgentSpeaking={setAgentSpeaking}
           />
         </LiveKitRoom>
       )}

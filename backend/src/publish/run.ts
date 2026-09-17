@@ -75,11 +75,11 @@ async function publishOne(client: PoolClient, row: StagingRow): Promise<number> 
   const recipeResult = await client.query<{ id: number }>(
     `insert into ${MAPPING.recipes.table}
        (${R.title}, ${R.description}, ${R.thumbnail}, ${R.cookingTime}, ${R.servings},
-        ${R.difficulty}, ${R.rating}, ${R.reviewCount}, ${R.category}, ${R.cuisine},
+        ${R.difficulty}, ${R.rating}, ${R.aiScore}, ${R.reviewCount}, ${R.category}, ${R.cuisine},
         ${R.sourceUrl}, ${R.sourceName}, ${R.sourceLicense}, ${R.urlHash},
         ${R.contentFingerprint}, ${R.qualityScore}, ${R.enrichmentVersion},
         ${R.crawledAt}, ${R.publishedAt})
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,now(),now())
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,now(),now())
      on conflict (${R.urlHash}) do update set
        ${R.title}              = excluded.${R.title},
        ${R.description}        = excluded.${R.description},
@@ -87,6 +87,7 @@ async function publishOne(client: PoolClient, row: StagingRow): Promise<number> 
        ${R.cookingTime}        = excluded.${R.cookingTime},
        ${R.servings}           = excluded.${R.servings},
        ${R.difficulty}         = excluded.${R.difficulty},
+       ${R.aiScore}            = excluded.${R.aiScore},
        ${R.category}           = excluded.${R.category},
        ${R.cuisine}            = excluded.${R.cuisine},
        ${R.sourceName}         = excluded.${R.sourceName},
@@ -105,6 +106,7 @@ async function publishOne(client: PoolClient, row: StagingRow): Promise<number> 
       enriched.servings ?? row.servings,
       enriched.difficulty,
       row.source_rating,
+      enriched.aiScore,
       row.source_review_count ?? 0,
       row.category,
       row.cuisine,

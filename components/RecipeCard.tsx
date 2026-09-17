@@ -75,6 +75,15 @@ export default function RecipeCard({ recipe, showHeart = false }: { recipe: any;
               ))}
             </View>
             <Text className="ml-2 text-gray-500">{recipe.rating}</Text>
+
+            {typeof recipe.aiScore === 'number' && (
+              <View className="ml-3 flex-row items-center rounded-full bg-primary/10 px-2 py-0.5">
+                <Ionicons name="sparkles-outline" size={12} color="#ff6b6b" />
+                <Text className="ml-1 text-xs font-semibold text-primary">
+                  {recipe.aiScore.toFixed(1)}
+                </Text>
+              </View>
+            )}
           </View>
         </View>
       </View>

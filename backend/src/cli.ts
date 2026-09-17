@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { clearTestUsers, seedTestUsers } from './auth/seed.js';
 import { reportUnmatched } from './canonical/match.js';
 import { seedCanonical } from './canonical/seed.js';
+import { discover } from './crawl/discover.js';
 import { crawl, enqueue, extractionReport } from './crawl/run.js';
 import { listSources, setSourcePolicy } from './crawl/sources.js';
 import { close } from './db.js';
@@ -11,7 +12,7 @@ import { logger } from './log.js';
 import { migrate } from './migrate.js';
 import { parseAll } from './parse/run.js';
 import { preflight, printPreflight, publishAll } from './publish/run.js';
-import { startReviewServer } from './review/server.js';
+import { startConsole } from './ui/server.js';
 
 const log = logger('cli');
 
@@ -39,7 +40,12 @@ CookMate recipe pipeline
   migrate                      Apply SQL migrations
   seed-canonical               Load/refresh the canonical ingredient dictionary
   seed-auth [--clear]          Create/refresh the test auth users (dev only)
+  ui                           Pipeline console: run every stage from a browser
   enqueue <url|@file> ...      Queue URLs (@file reads one URL per line)
+  discover <url>               Explore a site and queue the recipe URLs it finds
+          [--mode auto|sitemap|links]  [--max-pages N] [--depth N]
+          [--max-results N] [--verify] [--dry-run] [--subdomains]
+          [--include <regex>] [--exclude <regex>]
   sources                      Per-domain crawl/licence policy
     sources set <domain>       --allow-images / --no-allow-images
                                --license <text> --name <text>
@@ -53,7 +59,7 @@ CookMate recipe pipeline
   publish [--limit N]          Stage 4: write into the app tables
           [--check]            Introspect the schema without writing anything
           [--republish]        Also rewrite rows already published
-  review                       Local triage UI for the review queue
+  review                       Alias for \`ui\`
   unmatched [--limit N]        Ingredients the dictionary is missing
   pipeline [--limit N]         crawl -> parse -> enrich -> gate (stops before publish)
 `;
@@ -100,6 +106,38 @@ async function main() {
       }
       if (urls.length === 0) throw new Error('enqueue needs at least one URL or @file');
       await enqueue(urls);
+      break;
+    }
+
+    // One seed URL in, many recipe URLs out. The console's Discover tab calls
+    // the same function; this is here so a discovery run can be scripted.
+    case 'discover': {
+      const [seed] = args.filter((a) => !a.startsWith('--'));
+      if (!seed) throw new Error('discover needs a url, e.g. `npm run discover -- https://example.com`');
+
+      const mode = text(args, 'mode') ?? 'auto';
+      if (mode !== 'auto' && mode !== 'sitemap' && mode !== 'links') {
+        throw new Error(`--mode must be auto, sitemap or links (got "${mode}")`);
+      }
+
+      const result = await discover(seed, {
+        mode,
+        maxPages: option(args, 'max-pages', 40),
+        maxDepth: option(args, 'depth', 2),
+        maxResults: option(args, 'max-results', 200),
+        verify: flag(args, 'verify'),
+        dryRun: flag(args, 'dry-run'),
+        includeSubdomains: flag(args, 'subdomains'),
+        include: text(args, 'include'),
+        exclude: text(args, 'exclude'),
+      });
+
+      if (flag(args, 'dry-run')) {
+        for (const candidate of result.candidates) {
+          console.log(`${candidate.verified ? 'recipe   ' : 'candidate'}  ${candidate.url}`);
+        }
+        log.info(`dry run - nothing written. ${result.candidates.length} candidate(s).`);
+      }
       break;
     }
 
@@ -155,8 +193,12 @@ async function main() {
       else await publishAll(limit, flag(args, 'republish'));
       break;
 
+    // Same server either way: `review` is what this command used to be called,
+    // and the review queue is one of the console's tabs.
+    case 'ui':
+    case 'console':
     case 'review':
-      await startReviewServer();
+      await startConsole();
       return; // keep the process alive for the server
 
     case 'unmatched':
@@ -168,7 +210,7 @@ async function main() {
       await parseAll(limit);
       await enrichAll(limit);
       await gateAll(limit);
-      log.info('pipeline done - run `npm run review` to triage, then `npm run publish`');
+      log.info('pipeline done - run `npm run ui` to triage, then `npm run publish`');
       break;
 
     default:
