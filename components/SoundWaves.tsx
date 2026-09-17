@@ -76,9 +76,9 @@ const SoundWaveAnimator = () => {
               inputRange: [0, 1],
               outputRange: [4, 18], // Min height 4px, max height 18px
             }),
-            backgroundColor: animatedHeight.interpolate({
-              inputRange: [0, 0.5, 1],
-              outputRange: ['#4A90E2', '#7B68EE', '#FF6B6B'], // Color transition
+            opacity: animatedHeight.interpolate({
+              inputRange: [0, 1],
+              outputRange: [0.5, 1],
             }),
           },
         ]}
@@ -109,9 +109,10 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   waveBar: {
-    width: 4,
+    width: 3,
     marginHorizontal: 2,
     borderRadius: 2,
+    backgroundColor: '#FFFFFF',
   },
 });
 

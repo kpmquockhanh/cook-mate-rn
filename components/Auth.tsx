@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
-import { Alert, StyleSheet, View, TextInput, TouchableOpacity, Text, SafeAreaView } from 'react-native'
+import { Alert, StyleSheet, View, TextInput, TouchableOpacity, Text } from 'react-native'
+import { SafeAreaView } from 'react-native-safe-area-context'
 import { LinearGradient } from 'expo-linear-gradient'
 import { Ionicons } from '@expo/vector-icons'
 import { supabase } from '../lib/supabase'

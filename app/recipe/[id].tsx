@@ -22,6 +22,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useShopping } from '../../lib/ShoppingContext';
 import { Note, useRecipe, type Ingredient } from '../../hooks/useRecipe';
 import { getImageUrl } from '../../utils/index';
+import { scaleIngredientAmount } from '../../utils/ingredientScaling';
 import { LinearGradient } from 'expo-linear-gradient';
 import { WEB_MOBILE_MAX_WIDTH } from '../_layout';
 
@@ -57,12 +58,17 @@ export default function RecipeDetailPage() {
 
   const [activeTab, setActiveTab] = useState<'ingredients' | 'directions'>('ingredients');
   const [servings, setServings] = useState(recipeData?.servings || 4);
+  // The recipe's original servings/ingredient amounts, kept aside as the fixed
+  // basis for scaling. Scaling from the current (possibly already-scaled)
+  // `ingredients`/`servings` state instead would compound rounding on repeated changes.
+  const [baseServings, setBaseServings] = useState(recipeData?.servings || 4);
 
   // Animation setup
   const slideAnim = useRef(new Animated.Value(0)).current;
   const fadeAnim = useRef(new Animated.Value(1)).current;
   const tabScaleAnim = useRef(new Animated.Value(1)).current;
   const [ingredients, setIngredients] = useState<Ingredient[]>(recipeData?.ingredients || []);
+  const [baseIngredients, setBaseIngredients] = useState<Ingredient[]>(recipeData?.ingredients || []);
   const [notes, setNotes] = useState<Note[]>(recipeData?.notes || []);
   const [isFavorite, setIsFavorite] = useState(recipeData?.isFavorite || false);
   const [showScaleModal, setShowScaleModal] = useState(false);
@@ -86,6 +92,7 @@ export default function RecipeDetailPage() {
   React.useEffect(() => {
     if (recipeData?.ingredients) {
       setIngredients(recipeData.ingredients);
+      setBaseIngredients(recipeData.ingredients);
       setNotes(recipeData.notes);
     }
   }, [recipeData]);
@@ -94,6 +101,7 @@ export default function RecipeDetailPage() {
   React.useEffect(() => {
     if (recipeData?.servings) {
       setServings(recipeData.servings);
+      setBaseServings(recipeData.servings);
     }
   }, [recipeData]);
 
@@ -150,9 +158,18 @@ export default function RecipeDetailPage() {
   };
 
   const scaleServings = (newServings: number) => {
+    const ratio = newServings / (baseServings || 1);
+    setIngredients((prevIngredients) =>
+      baseIngredients.map((baseIngredient) => {
+        const current = prevIngredients.find((ingredient) => ingredient.id === baseIngredient.id);
+        return {
+          ...baseIngredient,
+          amount: scaleIngredientAmount(baseIngredient.amount, ratio),
+          checked: current?.checked ?? baseIngredient.checked,
+        };
+      })
+    );
     setServings(newServings);
-    // In a real app, you'd scale the ingredient amounts here using the ratio
-    // const ratio = newServings / mockRecipeData.servings;
   };
 
   const toggleFavorite = () => {

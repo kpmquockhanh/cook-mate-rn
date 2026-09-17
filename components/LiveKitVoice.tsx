@@ -9,7 +9,7 @@ import {
   LiveKitRoom,
   useVoiceAssistant,
 } from '@livekit/react-native';
-import type { MediaDeviceFailure } from 'livekit-client';
+import { ConnectionState, RoomEvent, type MediaDeviceFailure } from 'livekit-client';
 import {
   COOKING_STATE_ATTRIBUTE,
   serializeCookingState,
@@ -120,16 +120,31 @@ function RoomView({
     return () => clearTimeout(timer);
   }, [agentPresent, agentIdentity, room.name, onAgentPresence]);
 
+  // RoomView mounts as soon as the LiveKitRoom starts connecting, well before
+  // the signal WebSocket handshake finishes. Publishing attributes before then
+  // makes setAttributes time out instead of queuing, so track the real
+  // connection state and wait for it.
+  const [roomConnected, setRoomConnected] = useState(room.state === ConnectionState.Connected);
+  useEffect(() => {
+    const handleConnectionStateChanged = (state: ConnectionState) => {
+      setRoomConnected(state === ConnectionState.Connected);
+    };
+    room.on(RoomEvent.ConnectionStateChanged, handleConnectionStateChanged);
+    return () => {
+      room.off(RoomEvent.ConnectionStateChanged, handleConnectionStateChanged);
+    };
+  }, [room]);
+
   // Publish the current recipe and step to the agent. This runs on connect and
   // on every step change - including manual taps - so the agent never narrates
   // a step the user has already moved past.
   const serializedState = cookingState ? serializeCookingState(cookingState) : null;
   useEffect(() => {
-    if (!serializedState) return;
+    if (!serializedState || !roomConnected) return;
     localParticipant
       .setAttributes({ [COOKING_STATE_ATTRIBUTE]: serializedState })
       .catch((e: unknown) => log.error('Failed to publish cooking state', e));
-  }, [localParticipant, serializedState]);
+  }, [localParticipant, serializedState, roomConnected]);
 
   // Keep the latest callbacks in a ref so the RPC methods are registered once
   // per room. Re-registering on every render leaves a window where an inbound

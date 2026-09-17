@@ -53,6 +53,12 @@ async function callApp(
 
 export default defineAgent({
   entry: async (ctx: JobContext) => {
+    // Accepting the job only hands us the room's credentials; it does not join.
+    // Everything below needs a live room - `session.start` publishes the agent's
+    // track and `waitForParticipant` throws "room is not connected" - so connect
+    // before any of it.
+    await ctx.connect();
+
     // The app participant this job is serving. Pinned once it joins rather than
     // picking whichever participant happens to be first in the map, so the
     // agent cannot end up driving someone else's screen.
