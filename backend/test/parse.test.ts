@@ -6,7 +6,7 @@ import { parseIngredient, formatAmount } from '../src/parse/ingredient.js';
 import { parseIsoDuration, parseHumanDuration, parseServings, formatCookingTime } from '../src/parse/duration.js';
 import { segmentSteps } from '../src/parse/steps.js';
 import { normalizeName } from '../src/canonical/match.js';
-import { canonicalizeUrl } from '../src/util.js';
+import { canonicalizeUrl, domainOf, otherHostSpelling, urlHash } from '../src/util.js';
 import { extractJsonLd } from '../src/crawl/jsonld.js';
 
 test('expands unicode fractions with the right spacing', () => {
@@ -123,12 +123,44 @@ test('normalizes ingredient names down to their identity', () => {
   assert.equal(normalizeName('boneless skinless chicken thighs'), 'chicken thigh');
 });
 
-test('canonicalizes URLs so syndicated links collapse to one key', () => {
+test('canonicalizes URLs without rewriting the host that serves them', () => {
   assert.equal(
     canonicalizeUrl('https://www.example.com/recipe/pho/?utm_source=x&a=1#top'),
-    'https://example.com/recipe/pho?a=1',
+    'https://www.example.com/recipe/pho?a=1',
   );
   assert.equal(canonicalizeUrl('http://example.com/a/'), 'https://example.com/a');
+  // Hosts that 301 every path to their homepage when asked without `www.` are
+  // common enough that canonicalizing the prefix away loses the page.
+  assert.equal(
+    canonicalizeUrl('https://www.food.com/recipe/falafel-293197'),
+    'https://www.food.com/recipe/falafel-293197',
+  );
+});
+
+test('hashes both spellings of a host to one key', () => {
+  assert.equal(
+    urlHash('https://www.example.com/recipe/pho'),
+    urlHash('https://example.com/recipe/pho/'),
+  );
+  assert.equal(domainOf('https://www.example.com/a'), 'example.com');
+});
+
+test('offers the other www spelling only where one makes sense', () => {
+  assert.equal(
+    otherHostSpelling('https://food.com/recipe/falafel-293197'),
+    'https://www.food.com/recipe/falafel-293197',
+  );
+  assert.equal(
+    otherHostSpelling('https://www.food.com/recipe/falafel-293197'),
+    'https://food.com/recipe/falafel-293197',
+  );
+  // A two-part public suffix is still a bare domain, so `www.` belongs on it.
+  assert.equal(otherHostSpelling('https://bbc.co.uk/food/x'), 'https://www.bbc.co.uk/food/x');
+  // Anything already a subdomain has no second spelling worth guessing.
+  assert.equal(otherHostSpelling('https://blog.example.com/x'), null);
+  assert.equal(otherHostSpelling('https://blog.example.co.uk/x'), null);
+  // Stripping `www.` always makes sense, subdomain or not.
+  assert.equal(otherHostSpelling('https://www.blog.example.com/x'), 'https://blog.example.com/x');
 });
 
 test('extracts a Recipe from @graph JSON-LD', () => {

@@ -1,5 +1,10 @@
 import { Stack } from 'expo-router';
-import { ROOT_SCREENS, TRANSITION_DURATION, type ScreenTransition } from '../lib/navigationRoutes';
+import {
+  ROOT_SCREENS,
+  TRANSITION_DURATION,
+  type ScreenTransition,
+  type StackScreen,
+} from '../lib/navigationRoutes';
 
 const ANIMATION: Record<ScreenTransition, 'slide_from_right' | 'fade' | 'slide_from_bottom'> = {
   slide: 'slide_from_right',
@@ -7,7 +12,7 @@ const ANIMATION: Record<ScreenTransition, 'slide_from_right' | 'fade' | 'slide_f
   modal: 'slide_from_bottom',
 };
 
-export default function RootStack() {
+export default function RootStack({ screens = ROOT_SCREENS }: { screens?: StackScreen[] }) {
   return (
     <Stack
       screenOptions={{
@@ -17,7 +22,7 @@ export default function RootStack() {
         animationDuration: TRANSITION_DURATION,
         contentStyle: { backgroundColor: '#fff' },
       }}>
-      {ROOT_SCREENS.map(({ name, transition }) => (
+      {screens.map(({ name, transition }) => (
         <Stack.Screen key={name} name={name} options={{ animation: ANIMATION[transition] }} />
       ))}
     </Stack>

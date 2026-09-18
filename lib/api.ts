@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { t } from './i18n/translate';
 
 /**
  * The single way the app talks to the REST API (backend/src/api).
@@ -69,6 +70,11 @@ export async function apiFetch<T = unknown>(path: string, init: RequestInit = {}
 
   if (!response.ok) throw await apiError(response);
 
+  // A 204 has no body at all (the events endpoint answers that way), and
+  // response.json() on an empty body throws a SyntaxError that would read as a
+  // failed request for something that in fact succeeded.
+  if (response.status === 204) return undefined as T;
+
   const json = await response.json();
   // The API wraps rows as { data: ... }; tolerate a bare body so a route that
   // does not wrap still works.
@@ -77,7 +83,9 @@ export async function apiFetch<T = unknown>(path: string, init: RequestInit = {}
 
 async function apiError(response: Response): Promise<ApiError> {
   let reason: string | undefined;
-  let message = `Request failed: ${response.status}`;
+  // The user reads this one, so it is translated; `body.error` from the API
+  // is not, because only the server knows what it says.
+  let message = t('error.requestFailed', { status: response.status });
   try {
     const body = await response.json();
     if (typeof body?.reason === 'string') reason = body.reason;
@@ -85,6 +93,6 @@ async function apiError(response: Response): Promise<ApiError> {
   } catch {
     // A non-JSON error body (a proxy's HTML 502, say) is not worth failing on.
   }
-  if (response.status === 401) message = 'Please sign in again';
+  if (response.status === 401) message = t('error.signInAgain');
   return new ApiError(response.status, message, reason);
 }

@@ -38,6 +38,50 @@ Migrations, in order:
 | `0002_canonical_ingredients.sql` | The canonical ingredient dictionary |
 | `0003_app_provenance.sql` | Provenance columns on `public.recipes`, the `url_hash` unique index, canonical links on ingredients |
 | `0004_url_hash_unique.sql` | Makes the `url_hash` index non-partial so `on conflict` can infer it |
+| `0005_ai_score.sql` | The model's own 0–10 score on `public.recipes` |
+| `0006_raw_pages_storage.sql` | `raw_pages.storage_path` — the reference to the page's bytes in object storage |
+| `0007_drop_raw_page_html.sql` | Drops `raw_pages.html`. **Refuses to run** while any page still holds HTML that has not been moved |
+| `0008_llm_extraction.sql` | Version stamp and model for Tier D extraction |
+| `0009_freshness.sql` | Per-source recrawl interval, plus HTTP validators on the crawl queue |
+| `0010_crawl_runs.sql` | `crawler.crawl_runs` — per-run counters that outlive the process |
+| `0011_crawl_run_logs.sql` | `crawler.crawl_run_logs` — the lines a run produced, stored as it goes |
+
+### Where crawled HTML lives
+
+There are two buckets: `raw-pages` is **private** and holds gzipped crawled
+HTML, and `recipe-images` is **public** and holds mirrored recipe photos, which
+the app loads straight from an `<Image>` with no session. `npm run dev -- images
+--check` creates the second one and prints the exact URL the app's
+`EXPO_PUBLIC_STORAGE_URL` must be set to.
+
+
+Pages are kept in object storage (Supabase Storage, the same project as auth and
+the app tables), not in a Postgres column. `raw_pages` holds the reference and
+the content hash. They are **content-addressed and gzipped**, so the same HTML
+reached by two URLs is stored once and re-storing an unchanged page overwrites
+itself.
+
+```bash
+npm run dev -- storage check        # is it reachable? creates the bucket if not
+```
+
+Set `SUPABASE_SERVICE_ROLE_KEY` for this — the service role, not the publishable
+key, because the bucket is private. For local work with no Supabase project, set
+`RAW_PAGE_STORE=file` and pages go to `RAW_PAGE_DIR` on disk instead.
+
+**Upgrading a database that predates this**, HTML still in the column:
+
+```bash
+npm run migrate                       # 0006 lands; 0007 stops and tells you this
+npm run dev -- storage backfill       # move the bytes; resumable, idempotent
+npm run migrate                       # 0007 now drops the column
+```
+
+The guard in 0007 is deliberate. `migrate` applies every pending file in one
+invocation, so without it a single `npm run migrate` would add the reference
+column and drop the HTML in the same breath, destroying every page not yet
+moved. Each migration runs in its own transaction, so the failure leaves 0006
+applied and costs you one extra command.
 
 `publish --check` is the important one: this repo does not contain the backend
 that serves `EXPO_PUBLIC_API_URL`, so the publisher's table/column names are
@@ -69,8 +113,9 @@ functions the CLI does:
 npm run discover -- https://example.com         # explore a site, queue what it finds
 npm run enqueue -- https://example.com/recipe   # or @urls.txt, one per line
 npm run dev -- sources                          # per-domain crawl/licence policy
-npm run pipeline -- --limit 50                  # crawl → parse → enrich → gate
+npm run pipeline -- --limit 50                  # crawl → parse → images → enrich → gate
 npm run publish -- --limit 50                   # approved rows → app tables
+npm run dev -- images --check                   # create the image bucket, print the app's STORAGE_URL
 ```
 
 ### Finding recipes without a URL list
@@ -85,19 +130,25 @@ npm run discover -- https://example.com --exclude '/(tag|author)/'
 ```
 
 It reads the site's own sitemap when there is one (`Sitemap:` in robots.txt, or
-the usual paths), and otherwise walks links from the seed, preferring pages that
-might be recipes over navigation so the fetch budget is not spent on "About".
-Two things keep it honest:
+the usual paths, gzipped or not), and otherwise walks links from the seed,
+preferring pages that might be recipes over navigation so the fetch budget is
+not spent on "About". Three things keep it honest:
 
 - **It is bounded.** `--max-pages` is a hard fetch budget, `--depth` limits how
   far from the seed it will walk, `--max-results` caps what it returns.
 - **It is as polite as the crawler**, because it *is* the crawler: the same
   robots.txt reader, the same per-host `Crawl-delay`, the same user agent.
+- **It never pays for the same page twice.** A page already in `raw_pages` is
+  read from there instead of refetched — a hub walked last week still has the
+  links this walk needs. `--refetch` overrides that when seeing the page again
+  is the point.
 
-A page it fetched that turns out to be a recipe is written straight to
-`raw_pages` — discovery and crawling are one pass for those, so no source is
-asked for the same page twice. URLs it is confident about from their shape alone
-are queued without a fetch, for `crawl` to pick up.
+**Every page discovery downloads is kept**, not just the ones that turn out to
+be recipes. A page fetched as a candidate gets a `crawl_queue` row recording how
+it turned out; a hub, read only for its links, is stored without one. Keeping
+the misses is what lets a better extractor be run over them later without asking
+the source for those bytes a second time. URLs it is confident about from their
+shape alone are queued without a fetch, for `crawl` to pick up.
 
 **If published recipes come back without images**, that is the source policy
 doing its job, not a crawl failure — the photos are in `recipe_staging`, and
@@ -109,8 +160,95 @@ npm run dev -- sources set example.com --allow-images --name "Example" --license
 npm run publish -- --republish                  # also rewrites status='published' rows
 ```
 
-Each stage is also a standalone command (`crawl`, `parse`, `enrich`, `gate`) and
-a button in the console.
+Each stage is also a standalone command (`crawl`, `extract`, `parse`, `enrich`,
+`gate`) and a button in the console.
+
+### Keeping the corpus fresh
+
+Sources change their recipes, and a crawler that only ever fetches a URL once
+never finds out. Every source carries a revisit interval — 30 days by default,
+per-source, set in hours and thought about in days:
+
+```bash
+npm run dev -- sources set example.com --recrawl-days 7
+npm run dev -- sources set example.com --no-recrawl     # never revisit
+```
+
+`crawl` does the rest, and three things keep it from being expensive:
+
+- **It is bounded by the same `--limit` as the crawl it precedes**, so a large
+  corpus coming due at once does not turn one run into a full re-crawl.
+  Refreshes also take a worse priority than new URLs — finding something new
+  beats re-reading something you have.
+- **Unchanged pages cost a 304 and no body.** The `ETag` and `Last-Modified` a
+  source gave last time are sent back as `If-None-Match` / `If-Modified-Since`.
+  A 304 writes no new page and redoes nothing downstream.
+- **A changed page flows through on its own.** A new `raw_pages` row appears
+  beside the old one, `parse` picks it up without `--force`, and the enrichment
+  describing the old steps is cleared — its timers and step→ingredient indices
+  pointed into an array that no longer exists.
+
+`crawl` also takes back rows stranded in `fetching` by a killed run, once they
+are past `CRAWL_LOCK_LEASE_MINUTES` (15 by default). And when a source answers
+429 or 503 with `Retry-After`, **the whole host** waits that long — not just the
+request that was refused.
+
+### Did last night's crawl get worse?
+
+`crawl`, `extract` and `discover` each record a row in `crawler.crawl_runs`:
+what they were asked to do, and counters for what happened — pages fetched, the
+HTTP status distribution, which extractor tier won, robots skips, and failures
+split by reason. Counters are flushed while the run is still going, so a run
+that dies still leaves its numbers behind.
+
+```bash
+npm run dev -- runs                      # last 10 runs, all kinds
+npm run dev -- runs --kind crawl --limit 20
+npm run dev -- runs --log 21             # the log run #21 stored, oldest first
+```
+
+It prints a matrix — counters down, runs across, oldest on the left:
+
+```
+counter               #12     #15     #18     #21
+pages_fetched          50      50      50      48
+http_200               48      47      31      12
+http_304                0       0      17      34
+failed_no_markup        2       3      19       2
+```
+
+That shape is the point. A block of numbers per run hides a trend; side by side,
+`failed_no_markup` going 2 → 3 → 19 is impossible to miss, and `http_304`
+climbing is the revisit machinery doing its job. A dash means the counter did
+not exist for that run, which is not the same as counting zero.
+
+The console's **Runs** tab shows the same matrix with per-run deltas. Clicking a
+run opens the log it stored.
+
+### The log a run left behind
+
+Counters say a run went worse; only the lines say which URLs did it. So the log
+is stored with the run rather than streamed at whoever is watching: every line a
+`crawl`, `extract` or `discover` emits is written to `crawler.crawl_run_logs` as
+it goes — about a second behind live — and is still there after the run ends,
+after the console is closed, and after the process restarts. A run that crashes
+keeps the lines leading up to it, because the buffer is drained before the row
+is marked failed.
+
+Read one with `npm run dev -- runs --log <id>`, or from the console: the drawer
+follows the stored log of whatever stage it is watching, and the Runs tab opens
+any past run's log. A run is capped at 20,000 stored lines; past that the
+overflow is counted in the run's own `log_lines_dropped` counter rather than
+silently thrown away.
+
+Lines still go to stdout as always, so `docker logs` and a terminal-run crawl
+are unchanged.
+
+`npm run crawl -- --robots-check` re-evaluates everything already queued against
+the current robots.txt rules and prints what is now disallowed, grouped by
+domain, flagging any it had already fetched. It writes nothing — it is there so
+a change in how robots.txt is read shows up as a list rather than as URLs
+quietly disappearing from the next crawl.
 
 ## Docker
 
@@ -140,10 +278,18 @@ npm run api:dev    # same, restarting on change
 | Route | Auth | Notes |
 |-------|------|-------|
 | `GET /health` | public | Runs `select 1`; use it as a container healthcheck |
-| `GET /recipes` | required | `search`, `category`, `featured`, `popular`, `orderBy`, `order`, `limit`, `offset` |
+| `GET /recipes` | required | Search: `search`, `category`. Facets: `meal`, `mainIngredient`, `diet`, `difficulty`, `cuisine`, `maxMinutes`, `maxActiveMinutes`, `handsOff`. Lists: `popular`, `favorites`. Paging: `orderBy`, `order`, `limit`, `offset` |
 | `GET /recipes/:id` | required | Full detail with images, ingredients, instructions and notes. 404 when absent |
+| `PUT /recipes/:id/favorite` | required | Saves it for the caller. Idempotent |
+| `DELETE /recipes/:id/favorite` | required | Unsaves it. Idempotent |
+| `POST /recipes/:id/events` | required | `{ kind: 'viewed' \| 'started' \| 'completed' }`. 204, and what `popular` counts |
 
-Both return `{ data: ... }`.
+All but the events route return `{ data: ... }`.
+
+Every row carries `is_favorite` for the caller and `cook_count` for the last 30
+days. `popular` orders by completed cooks — real usage of this app, not the
+scraped `rating`, which is 5.00 on most rows because sites keep what their
+readers liked.
 
 ### Authentication
 
@@ -216,11 +362,13 @@ no re-crawling the internet.
 
 | Stage | Command | What it does |
 |---|---|---|
-| 0 Crawl | `crawl` | robots.txt + per-host rate limit, then tier A→B→C extraction |
+| 0 Crawl | `crawl` | robots.txt + per-host rate limit, conditional requests, then tier A→B→C extraction. HTML to object storage, reference to `raw_pages` |
+| 0.5 Extract | `extract` | Tier D: a model reads recipes off stored pages tiers A/B/C could not. Network-free. |
 | 1 Parse | `parse` | Deterministic: quantities, units, grams, step segmentation, canonical matching. No LLM. |
-| 2 Enrich | `enrich` | One Claude call per recipe: durations, timer names, step↔ingredient indices |
+| 1.5 Images | `images` | Downloads each recipe's photos into our own **public** Supabase bucket, so the app serves copies we hold instead of hotlinking. Skips any source without `allow_image_use`. |
+| 2 Enrich | `enrich` | One Claude call per recipe: durations, timer names, step↔ingredient indices, meal, cuisine |
 | 3 Gate | `gate` | Score 0–100, dedupe by fingerprint, route to `approved` / `review` / `rejected` |
-| 4 Publish | `publish` | Writes the app's exact wire shape; idempotent on `url_hash` |
+| 4 Publish | `publish` | Writes the app's exact wire shape, including the facets it derives (meal, hands-on time, main ingredient, diet); idempotent on `url_hash` |
 
 Stage 0 has a step in front of it that is optional but usually what you want:
 
@@ -230,16 +378,23 @@ Stage 0 has a step in front of it that is optional but usually what you want:
 
 ### The console
 
-`npm run ui` serves `src/ui/` on `REVIEW_PORT` (5174 by default): tabs for
-Discover, Add URLs, the crawl queue, per-domain source policy, the review queue
-and unmatched ingredients, plus a stage runner with a live log.
+`npm run ui` serves `src/ui/` on `REVIEW_PORT` (5174 by default): tabs for the
+crawl queue (which is also where URLs get in, either pasted as a list or found
+by exploring a site), per-domain source policy, the review queue and unmatched
+ingredients, plus a stage runner with a live log.
 
 Stage runs become **jobs** (`src/jobs/runner.ts`): they run in-process, stream
 their log lines to the page, and can be cancelled. Only one job per stage runs at
 a time, because two `crawl` runs would race for the same queue rows and two
 `enrich` runs would spend the model budget twice on the same staging rows. Jobs
 live in memory only — the pipeline's real state is in Postgres, so a restart
-costs you scrollback and nothing else.
+costs you a job list and nothing else.
+
+The log in the drawer is read from the database for any stage that records a run
+(`crawl`, `extract`, `discover`), which is why closing the tab or restarting the
+console no longer loses it. `pipeline` spans several runs plus stages that
+record none, so no single stored log is its log and it keeps the in-memory
+buffer; each stage inside it still stores its own.
 
 The console **binds to 127.0.0.1 by default and requires HTTP Basic Auth**
 (`REVIEW_USERNAME`/`REVIEW_PASSWORD`) on every request — it refuses to start
@@ -250,11 +405,42 @@ once real credentials are in place.
 
 ### Extraction tiers
 
-| Tier | Method | Coverage |
-|---|---|---|
-| A | `schema.org/Recipe` JSON-LD | ~80% of recipe sites |
-| B | Microdata / RDFa | +10% |
-| C | Per-domain adapter | the long tail |
+| Tier | Method | Coverage | Cost |
+|---|---|---|---|
+| A | `schema.org/Recipe` JSON-LD | ~80% of recipe sites | free |
+| B | Microdata / RDFa | +10% | free |
+| C | Per-domain adapter | the long tail | free, high maintenance |
+| D | A model reading the page as prose | everything else | **per page** |
+
+Tiers A–C read structure a page publishes about itself. **Tier D reads the page
+the way a person would**, which is what makes an ordinary food blog — recipes in
+plain prose, no markup anywhere — a usable source. It runs only when A, B and C
+have all missed, over pages already stored, so it never touches the network:
+
+```bash
+npm run extract -- --limit 50 --dry-run   # see what it would find, spend nothing
+npm run extract -- --limit 50
+```
+
+Three things keep it honest:
+
+- **It can say no.** A category listing, a round-up of links or an essay about a
+  dish returns "not a recipe", and that verdict is recorded so the next run does
+  not pay to reach it again.
+- **It has to be grounded.** Every ingredient line is checked back against the
+  page's own text. A well-formed recipe for a dish the page never mentions is
+  discarded — that is the failure a schema cannot catch.
+- **It is budgeted.** `EXTRACT_MAX_PAGES_PER_RUN` caps a run regardless of
+  `--limit`, listing-shaped URLs are skipped before any call is made, and
+  `EXTRACT_MAX_CHARS` bounds what one page can cost.
+
+Bump `EXTRACTION_VERSION` to re-read the whole backlog with a changed prompt —
+the same lever `ENRICHMENT_VERSION` is for the stage after it, and like it, no
+source is crawled again.
+
+**Tier D recipes never publish on score alone.** The gate routes them to
+`review` even at a passing score: a misread quantity looks exactly like a
+correct one, so a person sees it first.
 
 Adapters are maintenance debt — their selectors break on every redesign. Only
 write one when `npm run crawl -- --report` shows a domain you care about
@@ -280,9 +466,14 @@ outside 30s–8h is discarded as a model slip.
 - `robots.txt` is honoured, with per-host `Crawl-delay` and a contactable UA.
 - Ingredient lists and functional instructions are generally not copyrightable
   in the US; **photos and surrounding prose are**.
-- Images are only republished when `crawler.sources.allow_image_use` is true —
-  it defaults to **false** on every auto-created source. Set it per source with
-  `sources set <domain> --allow-images` once you have checked the licence.
+- Images are only **downloaded or republished** when `crawler.sources.allow_image_use`
+  is true — it defaults to **false** on every auto-created source. Set it per
+  source with `sources set <domain> --allow-images` once you have checked the
+  licence. This is the usual reason a crawl looks like it "came back without
+  images": the photos are in `recipe_staging.image_urls`, and both the mirror
+  stage and the publisher decline to use them.
+- Mirroring stores a **copy** of a photo, which is a bigger step than linking
+  one. Check the licence before turning a source on, not after.
 - `source_url` / `source_name` / `source_license` ride along to every published
   recipe so attribution is always available.
 
@@ -306,6 +497,6 @@ canonical link silently corrupts every shopping list it touches.
 ## Tests
 
 ```bash
-npm test          # 14 unit tests, no DB or network
+npm test          # unit tests; no DB or network needed
 npm run typecheck
 ```

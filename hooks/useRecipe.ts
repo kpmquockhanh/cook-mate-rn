@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 // apiFetch attaches the caller's Supabase access token; the API 401s without it.
 import { ApiError, apiFetch } from '../lib/api';
+import { t } from '../lib/i18n/translate';
 
 export interface RecipeDetail {
   id: string | number;
@@ -101,7 +102,7 @@ function mapDbRowToRecipeDetail(row: any): RecipeDetail {
       : [],
     reviews: Array.isArray(row.reviews) ? row.reviews.map((review: any, index: number) => ({
       id: String(review.id ?? index),
-      user: review.user ?? review.username ?? 'Anonymous',
+      user: review.user ?? review.username ?? t('error.anonymousReviewer'),
       rating: typeof review.rating === 'number' ? review.rating : 5,
       comment: review.comment ?? review.text ?? '',
     })) : [],
@@ -129,7 +130,7 @@ export function useRecipe(options: UseRecipeOptions): UseRecipeResult {
 
   const fetchRecipe = useCallback(async () => {
     if (!id) {
-      setError('Recipe ID is required');
+      setError(t('error.recipeIdRequired'));
       return;
     }
 
@@ -144,13 +145,13 @@ export function useRecipe(options: UseRecipeOptions): UseRecipeResult {
         // Keep the copy the screen already shows for a missing recipe; every
         // other failure (including a 401) keeps apiFetch's own message.
         if (err instanceof ApiError && err.status === 404) {
-          throw new Error('Recipe not found');
+          throw new Error(t('error.recipeNotFound'));
         }
         throw err;
       }
 
       if (!recipeData) {
-        throw new Error('Invalid recipe data received');
+        throw new Error(t('error.recipeInvalid'));
       }
 
       const mapped = mapDbRowToRecipeDetail(recipeData);
@@ -160,7 +161,7 @@ export function useRecipe(options: UseRecipeOptions): UseRecipeResult {
       }
     } catch (err: any) {
       if (mountedRef.current) {
-        setError(err?.message ?? 'Failed to fetch recipe');
+        setError(err?.message ?? t('error.recipeFetch'));
       }
     } finally {
       if (mountedRef.current) {

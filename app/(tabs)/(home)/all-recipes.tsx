@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -10,17 +10,66 @@ import {
 } from 'react-native';
 import { Container } from 'components/Container';
 import { StatusBar } from 'expo-status-bar';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import RecipeCard from 'components/RecipeCard';
 import Search from 'components/Search';
 import { useRecipes, RecipeListItem } from 'hooks/useRecipes';
 import { goBack } from 'lib/navigationRoutes';
+import { useTranslation } from '../../../lib/i18n';
+import { isEmptyFilter } from '../../../lib/recipeFacets';
+import { facetFilterFromParams } from '../../../lib/facetRoute';
+import { describeFilter } from '../../../lib/facetLabels';
 
 const ITEMS_PER_PAGE = 10;
 
 export default function AllRecipes() {
+  const { t } = useTranslation();
+  const router = useRouter();
+  // `focus` is set by the home search bar, which lands here ready to type; the
+  // rest are the facet chips and rail links (lib/facetRoute.ts).
+  // Destructured rather than held as an object: useLocalSearchParams hands
+  // back a fresh object every render, so memoizing on it would re-filter the
+  // whole list on every keystroke.
+  const {
+    focus,
+    meal,
+    ingredient,
+    diet,
+    difficulty,
+    maxMinutes,
+    handsOff,
+    favorites,
+    popular,
+  } = useLocalSearchParams<{
+    focus?: string;
+    meal?: string;
+    ingredient?: string;
+    diet?: string;
+    difficulty?: string;
+    maxMinutes?: string;
+    handsOff?: string;
+    favorites?: string;
+    popular?: string;
+  }>();
   const [searchQuery, setSearchQuery] = useState('');
   const [refreshing, setRefreshing] = useState(false);
+
+  const filter = useMemo(
+    () =>
+      facetFilterFromParams({
+        meal,
+        ingredient,
+        diet,
+        difficulty,
+        maxMinutes,
+        handsOff,
+        favorites,
+        popular,
+      }),
+    [meal, ingredient, diet, difficulty, maxMinutes, handsOff, favorites, popular]
+  );
+  const filtered = !isEmptyFilter(filter);
 
   // useRecipes pages by offset and reloads the first page whenever `search`
   // changes, so this screen only tracks the query itself.
@@ -36,7 +85,24 @@ export default function AllRecipes() {
     search: searchQuery,
     orderBy: 'created_at',
     order: 'desc',
+    // The API applies these, so paging still works while filtered: every page
+    // comes back already narrowed, and `hasMore` means what it says.
+    ...filter,
   });
+
+  /** Drops the facets but keeps whatever the user has typed. */
+  const clearFilter = useCallback(() => {
+    router.setParams({
+      meal: undefined,
+      ingredient: undefined,
+      diet: undefined,
+      difficulty: undefined,
+      maxMinutes: undefined,
+      handsOff: undefined,
+      favorites: undefined,
+      popular: undefined,
+    } as never);
+  }, [router]);
 
   const handleSearch = useCallback((search: string) => {
     setSearchQuery(search);
@@ -57,7 +123,7 @@ export default function AllRecipes() {
     return (
       <View style={styles.footerLoader}>
         <ActivityIndicator size="small" color="#FF6B6B" />
-        <Text style={styles.footerText}>Loading more recipes...</Text>
+        <Text style={styles.footerText}>{t('search.loadingMore')}</Text>
       </View>
     );
   };
@@ -71,14 +137,20 @@ export default function AllRecipes() {
     <View style={styles.emptyState}>
       <MaterialIcons name="restaurant" size={64} color="#DDD" />
       <Text style={styles.emptyStateTitle}>
-        {searchQuery ? 'No recipes found' : 'No recipes available'}
+        {searchQuery || filtered ? t('search.noResults') : t('allRecipes.emptyTitle')}
       </Text>
       <Text style={styles.emptyStateSubtitle}>
-        {searchQuery 
-          ? 'Try adjusting your search terms'
-          : 'Check back later for new recipes'
-        }
+        {filtered
+          ? t('allRecipes.noFilterResultsHint')
+          : searchQuery
+            ? t('allRecipes.noResultsHint')
+            : t('allRecipes.emptyHint')}
       </Text>
+      {filtered && (
+        <TouchableOpacity style={styles.retryButton} onPress={clearFilter}>
+          <Text style={styles.retryButtonText}>{t('allRecipes.clearFilter')}</Text>
+        </TouchableOpacity>
+      )}
     </View>
     )
   );
@@ -90,19 +162,38 @@ export default function AllRecipes() {
           <TouchableOpacity style={styles.backButton} onPress={() => goBack()}>
             <MaterialIcons name="arrow-back" size={24} color="#333" />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>All Recipes</Text>
+          <Text style={styles.headerTitle}>{t('allRecipes.title')}</Text>
           <View style={styles.headerSpacer} />
         </View>
 
         {/* px-5 lines the bar up with the cards below it; the wrapper used to
             add its own padding on top of the bar's. */}
-        <Search onSearch={handleSearch} containerClassName="px-5" />
+        <Search onSearch={handleSearch} autoFocus={focus === '1'} containerClassName="px-5" />
+
+        {filtered && (
+          <View style={styles.filterRow}>
+            <View style={styles.filterPill}>
+              <MaterialIcons name="filter-list" size={15} color="#ff6b6b" />
+              <Text style={styles.filterPillText}>
+                {describeFilter(filter).map((key) => t(key)).join(' · ')}
+              </Text>
+              <TouchableOpacity onPress={clearFilter} hitSlop={8}>
+                <MaterialIcons name="close" size={15} color="#ff6b6b" />
+              </TouchableOpacity>
+            </View>
+            {/* Counts what is loaded, not what exists: the server pages, so a
+                total would need a second query for a number nobody acts on. */}
+            <Text style={styles.filterCount}>
+              {t('allRecipes.resultCount', { count: recipes.length })}
+            </Text>
+          </View>
+        )}
 
         {error && (
           <View style={styles.errorContainer}>
             <Text style={styles.errorText}>{error}</Text>
             <TouchableOpacity style={styles.retryButton} onPress={() => refetch()}>
-              <Text style={styles.retryButtonText}>Retry</Text>
+              <Text style={styles.retryButtonText}>{t('common.retry')}</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -113,6 +204,7 @@ export default function AllRecipes() {
           keyExtractor={(item) => item.id.toString()}
           contentContainerStyle={styles.listContainer}
           showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
@@ -155,6 +247,31 @@ const styles = StyleSheet.create({
   },
   headerSpacer: {
     width: 40,
+  },
+  filterRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingTop: 12,
+  },
+  filterPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(255, 107, 107, 0.08)',
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 999,
+  },
+  filterPillText: {
+    color: '#ff6b6b',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  filterCount: {
+    color: '#999',
+    fontSize: 13,
   },
   listContainer: {
     paddingHorizontal: 20,

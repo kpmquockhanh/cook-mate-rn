@@ -41,6 +41,8 @@ function payload(overrides: Partial<EnrichmentPayload> = {}): EnrichmentPayload 
     ],
     notes: ['Salt at the end.'],
     difficulty: 'easy',
+    meal: 'dinner',
+    cuisine: null,
     servings: 4,
     totalTimeSeconds: 1800,
     aiScore: 7.5,

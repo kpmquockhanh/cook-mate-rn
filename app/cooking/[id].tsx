@@ -3,6 +3,7 @@ import {
   View,
   Text,
   TouchableOpacity,
+  Pressable,
   StatusBar,
   Animated,
   ScrollView,
@@ -13,12 +14,19 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useTimer, ActiveTimer } from '../../lib/TimerContext';
+import * as Brightness from 'expo-brightness';
+import * as Speech from 'expo-speech';
+import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
+import { useTimer } from '../../lib/TimerContext';
+import { useSettings } from '../../lib/SettingsContext';
+import { logger } from '../../lib/log';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useRecipe } from '../../hooks/useRecipe';
 import LiveKitVoice from '../../components/LiveKitVoice';
 import SoundWaves from '../../components/SoundWaves';
 import { buildCookingState } from '../../lib/cookingContext';
+import { clearRecentCooking, saveRecentCooking } from '../../lib/recentCooking';
+import { reportRecipeEvent } from '../../lib/recipeEvents';
 import { useLiveKitToken } from '../../lib/livekitToken';
 import {
   describeVoiceStatus,
@@ -26,6 +34,7 @@ import {
   type VoiceStatus,
   type VoiceTone,
 } from '../../lib/voiceSession';
+import { speechLocaleFor, useTranslation } from '../../lib/i18n';
 
 /**
  * NativeWind only registers a fixed list of react-native components for web
@@ -59,6 +68,14 @@ const STEP_PILL_STRIDE = 48;
  */
 const FALLBACK_TOP_INSET = Platform.OS === 'ios' ? 44 : RNStatusBar.currentHeight || 24;
 
+/** Tag for this screen's keep-awake lock, so it releases only its own. */
+const KEEP_AWAKE_TAG = 'cookmate-cooking';
+
+/** Brightness applied while cooking, when the setting is on. */
+const COOKING_BRIGHTNESS = 1;
+
+const log = logger('cooking');
+
 /** Icon colour for the voice status banner and its header control. */
 const VOICE_TONE_COLOR: Record<VoiceTone, string> = {
   neutral: 'rgba(255,255,255,0.9)',
@@ -69,13 +86,15 @@ const VOICE_TONE_COLOR: Record<VoiceTone, string> = {
 
 export default function CookingPage() {
   const router = useRouter();
+  const { t, language } = useTranslation();
   const { id } = useLocalSearchParams();
   const recipeId = Array.isArray(id) ? id[0] : id || '1';
 
   const { data: recipeData, loading, error } = useRecipe({ id: recipeId });
   const insets = useSafeAreaInsets();
   const headerTopInset = Math.max(insets.top, FALLBACK_TOP_INSET);
-  const { activeTimers, setActiveTimers } = useTimer();
+  const { activeTimers, startTimer } = useTimer();
+  const { settings, isLoaded: settingsLoaded } = useSettings();
 
   const [currentStep, setCurrentStep] = useState(0);
   const [ingredients, setIngredients] = useState<any[]>([]);
@@ -95,22 +114,29 @@ export default function CookingPage() {
   );
 
   // Per-user, per-recipe credentials from the livekit-token edge function.
+  // Passing null while the assistant is off (or before the setting has been
+  // read) is what stops a token being minted for a user who never wanted one.
+  const voiceEnabled = settingsLoaded && settings.voiceEnabled;
   const {
     credentials: livekit,
     loading: livekitLoading,
     error: livekitError,
     refresh: refreshLivekit,
-  } = useLiveKitToken(recipeId);
+  } = useLiveKitToken(voiceEnabled ? recipeId : null);
 
   // Without credentials there is nothing to connect to, so the token fetch's own
   // state is what the user needs to see. With them, the session state is.
-  const voiceStatus: VoiceStatus = livekit
-    ? voiceSession.status
-    : livekitLoading
-      ? 'preparing'
-      : 'unavailable';
+  const voiceStatus: VoiceStatus = !settingsLoaded
+    ? 'preparing'
+    : !settings.voiceEnabled
+      ? 'disabled'
+      : livekit
+        ? voiceSession.status
+        : livekitLoading
+          ? 'preparing'
+          : 'unavailable';
   const voiceDetail = livekit ? voiceSession.detail : livekitError;
-  const voiceCopy = describeVoiceStatus(voiceStatus, voiceDetail);
+  const voiceCopy = describeVoiceStatus(voiceStatus, voiceDetail, t);
   const voiceListening = voiceStatus === 'listening';
 
   // This screen is normally pushed from the recipe detail screen, but a deep
@@ -136,6 +162,46 @@ export default function CookingPage() {
       );
     }
   }, [recipeData]);
+
+  // Hold the display on for the session. Tagged rather than using
+  // `useKeepAwake`, because the hook cannot be turned off by a preference -
+  // hooks cannot be called conditionally, and the lock has to be released the
+  // moment the user switches the setting off, not on unmount.
+  useEffect(() => {
+    if (!settings.keepScreenAwake) return;
+
+    // Unsupported browsers reject rather than no-op, and a screen that dims is
+    // not worth an error dialog over.
+    activateKeepAwakeAsync(KEEP_AWAKE_TAG).catch((e) =>
+      log.warn('Could not keep the screen awake', e)
+    );
+
+    return () => {
+      deactivateKeepAwake(KEEP_AWAKE_TAG).catch((e) =>
+        log.warn('Could not release the keep-awake lock', e)
+      );
+    };
+  }, [settings.keepScreenAwake]);
+
+  // Brighten the screen for a phone propped up across the counter. This is the
+  // app's own brightness, not the system's: it needs no permission and the OS
+  // drops it as soon as the app is backgrounded, so a forgotten session cannot
+  // leave the device at full brightness.
+  useEffect(() => {
+    if (!settings.boostBrightness || Platform.OS === 'web') return;
+
+    let cancelled = false;
+    Brightness.setBrightnessAsync(COOKING_BRIGHTNESS).catch((e) => {
+      if (!cancelled) log.warn('Could not raise the brightness', e);
+    });
+
+    return () => {
+      cancelled = true;
+      Brightness.restoreSystemBrightnessAsync().catch((e) =>
+        log.warn('Could not restore the brightness', e)
+      );
+    };
+  }, [settings.boostBrightness]);
 
   // Animation refs
   const stepTransitionAnim = useRef(new Animated.Value(1)).current;
@@ -183,10 +249,14 @@ export default function CookingPage() {
     (index: number) => {
       const steps = recipeData?.instructions || [];
       const step = steps[index];
-      if (!step) return 'No instruction available';
-      return `Step ${index + 1} of ${steps.length}: ${step.instruction_text || 'No instruction available'}`;
+      if (!step) return t('cooking.noInstruction');
+      return t('cooking.describeStep', {
+        current: index + 1,
+        total: steps.length,
+        text: step.instruction_text || t('cooking.noInstruction'),
+      });
     },
-    [recipeData?.instructions]
+    [recipeData?.instructions, t]
   );
 
   const repeatCurrentStep = useCallback(
@@ -197,25 +267,25 @@ export default function CookingPage() {
   const goToNextStep = useCallback(() => {
     const steps = recipeData?.instructions || [];
     if (currentStep >= steps.length - 1) {
-      return `This is the last step. ${describeStep(currentStep)}`;
+      return t('cooking.lastStep', { step: describeStep(currentStep) });
     }
 
     const nextStep = currentStep + 1;
     animateStepTransition();
     setCurrentStep(nextStep);
     return describeStep(nextStep);
-  }, [currentStep, recipeData?.instructions, describeStep, animateStepTransition]);
+  }, [currentStep, recipeData?.instructions, describeStep, animateStepTransition, t]);
 
   const goToPreviousStep = useCallback(() => {
     if (currentStep <= 0) {
-      return `This is already the first step. ${describeStep(currentStep)}`;
+      return t('cooking.firstStep', { step: describeStep(currentStep) });
     }
 
     const previousStep = currentStep - 1;
     animateStepTransition();
     setCurrentStep(previousStep);
     return describeStep(previousStep);
-  }, [currentStep, describeStep, animateStepTransition]);
+  }, [currentStep, describeStep, animateStepTransition, t]);
 
   const jumpToStep = (index: number) => {
     if (index === currentStep) return;
@@ -234,20 +304,15 @@ export default function CookingPage() {
   };
 
   const startStepTimer = (seconds: number, customName?: string) => {
-    const timerName = customName || `Step ${currentStep + 1}`;
-
-    const newTimer: ActiveTimer = {
-      id: `cooking-step-${currentStep}-${Date.now()}`,
-      name: timerName,
-      totalSeconds: seconds,
-      remainingSeconds: seconds,
-      status: 'running',
-      priority: 'critical',
+    // Through the context's own helper, so this timer gets the same wall-clock
+    // end time as one started from the timer tab and stays accurate while the
+    // app is backgrounded.
+    const id = startTimer({
+      name: customName || t('cooking.stepTimerName', { number: currentStep + 1 }),
+      seconds,
       emoji: '👨‍🍳',
-    };
-
-    setActiveTimers((prev) => [...prev, newTimer]);
-    setStepTimers((prev) => ({ ...prev, [currentStep]: newTimer.id }));
+    });
+    setStepTimers((prev) => ({ ...prev, [currentStep]: id }));
   };
 
   const formatTime = (seconds: number) => {
@@ -261,6 +326,41 @@ export default function CookingPage() {
   const isLastStep = steps.length > 0 && currentStep === steps.length - 1;
   const progressPercent =
     steps.length > 0 ? Math.round(((currentStep + 1) / steps.length) * 100) : 0;
+
+  // Cooking Mode opened: the weaker of the two signals, but the one that says
+  // someone meant to cook this rather than read it.
+  useEffect(() => {
+    if (recipeId) reportRecipeEvent(recipeId, 'started');
+  }, [recipeId]);
+
+  // Stepping back off the last step and onto it again is one cook, not two.
+  const completedReportedFor = useRef<string | null>(null);
+
+  // Remember where this session got to, so home can offer to come back to it.
+  // Written on every step change rather than on unmount: cooking screens are
+  // left by walking away from the phone as often as by tapping Close, and an
+  // unmount handler never runs when the app is killed from the background.
+  useEffect(() => {
+    if (!recipeData || steps.length === 0) return;
+    // The last step is the end of the recipe, not a place to resume from - and
+    // reaching it is the only event that means someone actually cooked this,
+    // which is what the "most cooked" rail counts.
+    if (currentStep >= steps.length - 1) {
+      clearRecentCooking();
+      if (completedReportedFor.current !== recipeId) {
+        completedReportedFor.current = recipeId;
+        reportRecipeEvent(recipeId, 'completed');
+      }
+      return;
+    }
+    saveRecentCooking({
+      id: String(recipeId),
+      title: recipeData.title,
+      thumbnail: recipeData.thumbnail,
+      step: currentStep + 1,
+      totalSteps: steps.length,
+    });
+  }, [recipeId, recipeData, currentStep, steps.length]);
 
   // Published to the voice agent so it knows the recipe and follows the user's
   // position, whether they navigated by voice or by tapping.
@@ -278,6 +378,36 @@ export default function CookingPage() {
   const currentStepTimer = stepTimers[currentStep]
     ? activeTimers.find((timer) => timer.id === stepTimers[currentStep])
     : null;
+
+  // Read the step aloud with the device's own synthesiser. Suppressed while the
+  // LiveKit agent is connected: the agent narrates steps itself, and two voices
+  // reading the same instruction over each other is worse than neither.
+  const stepText = currentStepData?.instruction_text;
+  useEffect(() => {
+    if (!settings.spokenSteps || voiceListening || !stepText) return;
+
+    // Cut off whatever is still being said: on a fast double-tap through the
+    // steps the queue would otherwise read every step the user skipped.
+    Speech.stop();
+    // The locale matters as much as the words: without it the platform reads
+    // Vietnamese text with an English voice.
+    Speech.speak(t('cooking.spokenStep', { number: currentStep + 1, text: stepText }), {
+      rate: settings.speechRate,
+      language: speechLocaleFor(language),
+    });
+
+    return () => {
+      Speech.stop();
+    };
+  }, [
+    settings.spokenSteps,
+    settings.speechRate,
+    voiceListening,
+    stepText,
+    currentStep,
+    t,
+    language,
+  ]);
 
   // Circular control that stays legible over the gradient header.
   const headerButton = (
@@ -299,7 +429,7 @@ export default function CookingPage() {
       <View className="flex-1 items-center justify-center bg-white">
         <StatusBar barStyle="dark-content" />
         <ActivityIndicator size="large" color={PRIMARY} />
-        <Text className="mt-4 text-base text-gray-500">Loading recipe…</Text>
+        <Text className="mt-4 text-base text-gray-500">{t('recipe.loading')}</Text>
       </View>
     );
   }
@@ -310,10 +440,12 @@ export default function CookingPage() {
       <View className="flex-1 items-center justify-center bg-white px-6">
         <StatusBar barStyle="dark-content" />
         <Ionicons name="alert-circle-outline" size={64} color="#EF4444" />
-        <Text className="mb-2 mt-4 text-xl font-semibold text-gray-800">Error Loading Recipe</Text>
-        <Text className="mb-6 text-center text-gray-600">{error || 'Recipe not found'}</Text>
+        <Text className="mb-2 mt-4 text-xl font-semibold text-gray-800">
+          {t('recipe.loadError')}
+        </Text>
+        <Text className="mb-6 text-center text-gray-600">{error || t('recipe.notFound')}</Text>
         <TouchableOpacity className="rounded-lg bg-primary px-6 py-3" onPress={exitCooking}>
-          <Text className="font-semibold text-white">Go Back</Text>
+          <Text className="font-semibold text-white">{t('common.goBack')}</Text>
         </TouchableOpacity>
       </View>
     );
@@ -340,7 +472,7 @@ export default function CookingPage() {
 
           <View className="mx-3 flex-1">
             <Text className="text-center text-xs font-semibold uppercase tracking-wide text-white/70">
-              Cooking
+              {t('cooking.header')}
             </Text>
             <Text className="text-center text-lg font-bold text-white" numberOfLines={1}>
               {recipeData.title}
@@ -356,6 +488,7 @@ export default function CookingPage() {
                 onNextStep={goToNextStep}
                 onPreviousStep={goToPreviousStep}
                 onRepeatStep={repeatCurrentStep}
+                autoStart={settings.voiceAutoStart}
                 onStatusChange={handleVoiceStatus}
               />
             </View>
@@ -379,9 +512,11 @@ export default function CookingPage() {
         <View className="mt-5">
           <View className="mb-2 flex-row items-baseline justify-between">
             <Text className="text-sm font-semibold text-white">
-              Step {currentStep + 1} of {steps.length}
+              {t('cooking.progress', { current: currentStep + 1, total: steps.length })}
             </Text>
-            <Text className="text-xs text-white/70">{progressPercent}% done</Text>
+            <Text className="text-xs text-white/70">
+              {t('cooking.percentDone', { percent: progressPercent })}
+            </Text>
           </View>
 
           <View className="h-2 w-full overflow-hidden rounded-full bg-white/25">
@@ -446,20 +581,22 @@ export default function CookingPage() {
                 <Text className="text-sm font-bold text-white">{currentStep + 1}</Text>
               </View>
               <Text className="flex-1 text-sm font-semibold uppercase tracking-wide text-gray-400">
-                Current step
+                {t('cooking.currentStep')}
               </Text>
               {currentStepData?.duration ? (
                 <View className="flex-row items-center rounded-full bg-gray-100 px-3 py-1">
                   <Ionicons name="timer-outline" size={14} color="#6B7280" />
                   <Text className="ml-1 text-xs font-medium text-gray-600">
-                    {Math.round(currentStepData.duration / 60)} min
+                    {t('duration.minutes', {
+                      count: Math.round(currentStepData.duration / 60),
+                    })}
                   </Text>
                 </View>
               ) : null}
             </View>
 
             <Text className="text-2xl font-bold leading-9 text-gray-800">
-              {currentStepData?.instruction_text || 'No instruction available'}
+              {currentStepData?.instruction_text || t('cooking.noInstruction')}
             </Text>
 
             {/* Only while the agent is actually listening. Shown unconditionally
@@ -468,8 +605,7 @@ export default function CookingPage() {
               <View className="mt-5 flex-row rounded-2xl bg-orange-50 p-4">
                 <Ionicons name="mic-outline" size={20} color={SECONDARY} />
                 <Text className="ml-3 flex-1 text-sm leading-6 text-gray-700">
-                  Say &quot;next step&quot;, &quot;go back&quot; or &quot;repeat&quot; to navigate
-                  hands-free.
+                  {t('cooking.voiceHint')}
                 </Text>
               </View>
             )}
@@ -480,7 +616,7 @@ export default function CookingPage() {
         {steps.length > 1 && (
           <View className="pt-6">
             <Text className="mb-3 px-5 text-base font-semibold text-gray-800">
-              All steps ({steps.length})
+              {t('cooking.allSteps', { count: steps.length })}
             </Text>
             <ScrollView
               ref={stepStripRef}
@@ -491,10 +627,15 @@ export default function CookingPage() {
                 const isCurrent = index === currentStep;
                 const isDone = index < currentStep;
                 return (
-                  <TouchableOpacity
+                  /* Pressable rather than TouchableOpacity: onPress re-renders this button
+                 with a new style, which strands TouchableOpacity's fade-back animation
+                 and leaves the selected item washed out. Keep the style a plain
+                 object/array -- NativeWind's jsx runtime ignores ({ pressed }) => []. */
+                  <Pressable
                     key={step.id ?? index}
                     onPress={() => jumpToStep(index)}
-                    activeOpacity={0.8}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: isCurrent }}
                     className="mr-2 h-10 w-10 items-center justify-center rounded-full"
                     style={{
                       backgroundColor: isCurrent ? PRIMARY : isDone ? '#FFEDE8' : '#F3F4F6',
@@ -508,7 +649,7 @@ export default function CookingPage() {
                         {index + 1}
                       </Text>
                     )}
-                  </TouchableOpacity>
+                  </Pressable>
                 );
               })}
             </ScrollView>
@@ -519,10 +660,11 @@ export default function CookingPage() {
         {currentStepIngredients.length > 0 && (
           <View className="px-5 pt-7">
             <View className="mb-1 flex-row items-baseline justify-between">
-              <Text className="text-xl font-semibold text-gray-800">You&apos;ll need</Text>
+              <Text className="text-xl font-semibold text-gray-800">
+                {t('cooking.youWillNeed')}
+              </Text>
               <Text className="text-sm text-gray-400">
-                {currentStepIngredients.length} item
-                {currentStepIngredients.length > 1 ? 's' : ''}
+                {t('cooking.ingredientCount', { count: currentStepIngredients.length })}
               </Text>
             </View>
 
@@ -560,7 +702,7 @@ export default function CookingPage() {
         {/* Timer Section */}
         {(currentStepData?.duration || currentStepTimer) && (
           <View className="px-5 pt-7">
-            <Text className="mb-3 text-xl font-semibold text-gray-800">Timer</Text>
+            <Text className="mb-3 text-xl font-semibold text-gray-800">{t('cooking.timer')}</Text>
 
             {currentStepTimer ? (
               <View className="rounded-2xl bg-white p-5" style={CARD_SHADOW}>
@@ -602,7 +744,9 @@ export default function CookingPage() {
                     }}>
                     <Ionicons name="timer-outline" size={22} color="white" />
                     <Text className="ml-2 text-lg font-semibold text-white">
-                      Start timer ({Math.round(currentStepData.duration / 60)} min)
+                      {t('cooking.startStepTimer', {
+                        count: Math.round(currentStepData.duration / 60),
+                      })}
                     </Text>
                   </LinearGradient>
                 </TouchableOpacity>
@@ -648,7 +792,7 @@ export default function CookingPage() {
                 justifyContent: 'center',
               }}>
               <Text className="mr-2 text-lg font-semibold text-white">
-                {isLastStep ? 'Finish cooking' : 'Next step'}
+                {isLastStep ? t('cooking.finish') : t('cooking.nextStep')}
               </Text>
               <Ionicons
                 name={isLastStep ? 'checkmark-circle' : 'chevron-forward'}

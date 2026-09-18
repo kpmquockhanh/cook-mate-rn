@@ -2,8 +2,7 @@ import OpenAI from 'openai';
 import * as z from 'zod/v4';
 import { env } from '../../env.js';
 import { logger } from '../../log.js';
-import { EnrichmentSchema } from '../schema.js';
-import type { EnrichProvider, ProviderRequest, ProviderResponse } from './types.js';
+import type { LlmProvider, ProviderRequest, ProviderResponse } from './types.js';
 
 const log = logger('enrich:deepseek');
 
@@ -28,22 +27,30 @@ function client(): OpenAI {
  * content", which is a transient fault rather than a bad recipe - hence the
  * retry rather than a hard failure on the first empty body.
  */
-const SCHEMA_JSON = JSON.stringify(z.toJSONSchema(EnrichmentSchema));
 const MAX_ATTEMPTS = 3;
 
-function schemaInstruction(): string {
+// Rendering a schema to JSON Schema is pure and the set of schemas is tiny and
+// long-lived, so it is computed once per schema rather than once per call.
+const schemaJson = new WeakMap<object, string>();
+
+function schemaInstruction(schema: z.ZodType<unknown>): string {
+  let json = schemaJson.get(schema);
+  if (!json) {
+    json = JSON.stringify(z.toJSONSchema(schema));
+    schemaJson.set(schema, json);
+  }
   return [
     '',
     'Respond with a single JSON object and nothing else - no prose, no markdown fence.',
     'It must conform to this JSON Schema:',
-    SCHEMA_JSON,
+    json,
   ].join('\n');
 }
 
-export const deepseekProvider: EnrichProvider = {
+export const deepseekProvider: LlmProvider = {
   name: 'deepseek',
 
-  async complete(request: ProviderRequest): Promise<ProviderResponse> {
+  async complete<T>(request: ProviderRequest<T>): Promise<ProviderResponse<T>> {
     let lastError: Error | null = null;
 
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
@@ -55,7 +62,7 @@ export const deepseekProvider: EnrichProvider = {
           temperature: 0,
           response_format: { type: 'json_object' },
           messages: [
-            { role: 'system', content: request.system + schemaInstruction() },
+            { role: 'system', content: request.system + schemaInstruction(request.schema) },
             { role: 'user', content: request.user },
           ],
         });
@@ -63,7 +70,7 @@ export const deepseekProvider: EnrichProvider = {
         const choice = response.choices[0];
         if (choice?.finish_reason === 'length') {
           // Not retryable: a longer recipe will truncate again on every attempt.
-          throw new Error('enrichment truncated at max_tokens - recipe too long for one call');
+          throw new Error('response truncated at max_tokens - input too long for one call');
         }
 
         const raw = choice?.message?.content?.trim();
@@ -76,7 +83,7 @@ export const deepseekProvider: EnrichProvider = {
           throw new RetryableError('model returned non-JSON content');
         }
 
-        const parsed = EnrichmentSchema.safeParse(json);
+        const parsed = request.schema.safeParse(json);
         if (!parsed.success) {
           throw new RetryableError(`payload failed schema: ${parsed.error.issues[0]?.message}`);
         }
@@ -95,7 +102,7 @@ export const deepseekProvider: EnrichProvider = {
       }
     }
 
-    throw new Error(`deepseek enrichment failed after ${MAX_ATTEMPTS} attempts: ${lastError?.message}`);
+    throw new Error(`deepseek call failed after ${MAX_ATTEMPTS} attempts: ${lastError?.message}`);
   },
 };
 

@@ -26,6 +26,20 @@ export const EnrichedStepSchema = z.object({
   isPassive: z.boolean().describe('True when the cook waits rather than works'),
 });
 
+/**
+ * The meals a recipe can belong to. 'basics' is for the things that are not a
+ * meal at all - sauces, marinades, stocks, frostings - which would otherwise be
+ * filed under whatever they are eventually eaten with.
+ */
+export const MealSchema = z.enum([
+  'breakfast',
+  'lunch',
+  'dinner',
+  'dessert',
+  'snack',
+  'basics',
+]);
+
 export const EnrichmentSchema = z.object({
   steps: z.array(EnrichedStepSchema),
   notes: z
@@ -34,6 +48,14 @@ export const EnrichmentSchema = z.object({
   difficulty: z.enum(['easy', 'medium', 'hard']),
   servings: z.number().int().nullable().describe('Servings if stated or clearly inferable, else null'),
   totalTimeSeconds: z.number().int().nullable(),
+  meal: MealSchema.describe('The meal this dish is eaten at, or "basics" when it is a component'),
+  cuisine: z
+    .string()
+    .nullable()
+    .describe(
+      'The cuisine in one or two words ("Italian", "Sichuan", "Tex-Mex"). ' +
+        'null when the dish belongs to no particular tradition.',
+    ),
   aiScore: z
     .number()
     .min(0)

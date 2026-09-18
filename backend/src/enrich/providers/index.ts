@@ -1,12 +1,12 @@
 import { env } from '../../env.js';
 import { anthropicProvider } from './anthropic.js';
 import { deepseekProvider } from './deepseek.js';
-import type { EnrichProvider } from './types.js';
+import type { LlmProvider } from './types.js';
 
 export const PROVIDERS = {
   anthropic: anthropicProvider,
   deepseek: deepseekProvider,
-} as const satisfies Record<string, EnrichProvider>;
+} as const satisfies Record<string, LlmProvider>;
 
 export type ProviderName = keyof typeof PROVIDERS;
 
@@ -15,8 +15,8 @@ export function isProviderName(value: string): value is ProviderName {
 }
 
 /** Resolved per call, so a test can flip ENRICH_PROVIDER without a fresh process. */
-export function activeProvider(): EnrichProvider {
+export function activeProvider(): LlmProvider {
   return PROVIDERS[env.enrichProvider];
 }
 
-export type { EnrichProvider, ProviderRequest, ProviderResponse } from './types.js';
+export type { EnrichProvider, LlmProvider, ProviderRequest, ProviderResponse } from './types.js';

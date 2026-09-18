@@ -1,7 +1,7 @@
 import { env } from '../env.js';
 import { logger } from '../log.js';
 import type { EnrichmentResult, ParsedIngredient, ParsedStep } from '../types.js';
-import type { EnrichmentPayload } from './schema.js';
+import { EnrichmentSchema, type EnrichmentPayload } from './schema.js';
 import { activeProvider } from './providers/index.js';
 
 const log = logger('enrich');
@@ -18,6 +18,8 @@ Rules:
 - timerName is an imperative of at most 3 words ("Simmer sauce", "Rest dough"). It is null exactly when durationSeconds is null.
 - Return one entry per input step, with its original index. Do not merge, split, reorder, or add steps.
 - notes are your own short practical tips (max 3). Do not copy the source's prose.
+- meal is when the dish is eaten, not what it contains: a bacon-and-egg pie eaten at dinner is "dinner". Use "basics" for anything that is a component rather than a dish - a sauce, a marinade, a stock, a frosting.
+- cuisine is the tradition the dish comes from, in one or two words. Use null rather than guessing when it is generic; "Copycat" and "Western" are not cuisines.
 - aiScore is your own 0-10 judgment of the recipe's quality (clarity, ingredient balance, appeal). Base it only on the recipe itself, never on any rating present in the source.
 - Never invent ingredients, steps, or times that the input does not support.`;
 
@@ -84,6 +86,12 @@ function sanitize(payload: EnrichmentPayload, input: EnrichInput): EnrichmentRes
     steps,
     notes: payload.notes.slice(0, 3).map((n) => n.trim()).filter(Boolean),
     difficulty: payload.difficulty,
+    // The model reads the whole recipe, so it is a better source for these
+    // than the scraped columns: `cuisine` is null on 32 of 45 published rows,
+    // and `category` is source free text. publish/facets.ts decides which one
+    // wins when both have an opinion.
+    meal: payload.meal,
+    cuisine: payload.cuisine?.trim() || null,
     servings: payload.servings ?? input.servingsHint,
     totalTimeSeconds: payload.totalTimeSeconds ?? input.totalTimeHint,
     // Schema already enforces 0-10, but a provider without constrained
@@ -111,6 +119,7 @@ export async function enrichRecipe(
     user: buildUserMessage(input),
     model,
     escalate: options.escalate ?? false,
+    schema: EnrichmentSchema,
   });
 
   log.debug(`${provider.name}:${response.model} enriched "${input.title}"`);

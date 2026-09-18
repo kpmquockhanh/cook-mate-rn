@@ -20,6 +20,12 @@ import {
   type VoiceSessionStatus,
 } from '../lib/voiceSession';
 import { errorMessage, logger } from '../lib/log';
+// Two translators, deliberately: `tStatic` is for strings produced inside
+// callbacks (an RPC reply, an error detail), where the language only has to be
+// current at the moment they run, and the hook's `t` is for what is rendered,
+// which has to re-render when the preference changes.
+import { t as tStatic, useTranslation } from '../lib/i18n';
+import type { TranslationKey } from '../lib/i18n';
 
 // Web build of LiveKitVoice. `@livekit/react-native` pulls in
 // `@livekit/react-native-webrtc`, which calls `requireNativeComponent` - an API
@@ -51,6 +57,13 @@ interface LiveKitVoiceProps {
   onNextStep?: StepCallback;
   onPreviousStep?: StepCallback;
   onRepeatStep?: StepCallback;
+  /**
+   * Accepted for parity with the native build, where it connects on mount.
+   * Ignored here: browsers only grant the microphone and unblock audio playback
+   * from inside a user gesture, so an automatic connect would fail as a
+   * permission denial the user never triggered and cannot make sense of.
+   */
+  autoStart?: boolean;
   /**
    * Every state change, with the underlying reason when the state is a failure.
    * The cooking screen is what turns this into a line the user can read.
@@ -91,6 +104,7 @@ const LiveKitVoice: React.FC<LiveKitVoiceProps> = ({
   onRepeatStep,
   onStatusChange,
 }) => {
+  const { t } = useTranslation();
   const [session, setSession] = useState<Session>(READY);
   const [agentSpeaking, setAgentSpeaking] = useState(false);
   const roomRef = useRef<Room | null>(null);
@@ -198,7 +212,7 @@ const LiveKitVoice: React.FC<LiveKitVoiceProps> = ({
         clearTimeout(agentTimer);
         setSession({
           status: 'mic-denied',
-          detail: errorMessage(e, 'The browser blocked the microphone'),
+          detail: errorMessage(e, tStatic('voice.detailMicBlocked')),
         });
       })
       .on(RoomEvent.Disconnected, (reason) => {
@@ -215,28 +229,30 @@ const LiveKitVoice: React.FC<LiveKitVoiceProps> = ({
     // The agent reads the returned string aloud, so a throw here becomes an
     // unexplained apology in the user's ear. Log it, answer with something
     // sayable.
-    const rpc = (name: string, run: () => string | void, fallback: string) => async () => {
+    const rpc = (name: string, run: () => string | void, fallback: TranslationKey) => async () => {
       try {
-        const result = run() || fallback;
+        const result = run() || tStatic(fallback);
         log.info(`RPC ${name} -> ${result}`);
         return result;
       } catch (e) {
         log.error(`RPC ${name} failed`, e);
-        return `Sorry, I could not do that: ${errorMessage(e, 'something went wrong')}`;
+        return tStatic('voice.rpcFailed', {
+          reason: errorMessage(e, tStatic('voice.rpcFailedReason')),
+        });
       }
     };
 
     room.registerRpcMethod(
       'navigate_next',
-      rpc('navigate_next', () => handlers.current.onNextStep?.(), 'Moved to the next step')
+      rpc('navigate_next', () => handlers.current.onNextStep?.(), 'voice.rpcNext')
     );
     room.registerRpcMethod(
       'navigate_back',
-      rpc('navigate_back', () => handlers.current.onPreviousStep?.(), 'Moved to the previous step')
+      rpc('navigate_back', () => handlers.current.onPreviousStep?.(), 'voice.rpcBack')
     );
     room.registerRpcMethod(
       'repeat_step',
-      rpc('repeat_step', () => handlers.current.onRepeatStep?.(), 'Repeated the current step')
+      rpc('repeat_step', () => handlers.current.onRepeatStep?.(), 'voice.rpcRepeat')
     );
 
     await room.localParticipant.setMicrophoneEnabled(true);
@@ -266,19 +282,19 @@ const LiveKitVoice: React.FC<LiveKitVoiceProps> = ({
         log.error('Microphone denied', err);
         setSession({
           status: 'mic-denied',
-          detail: errorMessage(err, 'The browser blocked the microphone'),
+          detail: errorMessage(err, tStatic('voice.detailMicBlocked')),
         });
         return;
       }
       log.error('Room error', err);
       setSession({
         status: 'error',
-        detail: errorMessage(err, 'Could not reach the voice service'),
+        detail: errorMessage(err, tStatic('voice.detailUnreachable')),
       });
     }
   }, [session.status, connect, teardown]);
 
-  const copy = describeVoiceStatus(session.status, session.detail);
+  const copy = describeVoiceStatus(session.status, session.detail, t);
   const control = voiceControlIcon(session.status, agentSpeaking);
 
   return (

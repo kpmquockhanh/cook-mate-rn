@@ -17,17 +17,48 @@ interface RawPageRow {
   extracted: ExtractedRecipe;
 }
 
+// `raw_pages` is append-only: a page re-fetched with different content is a new
+// row beside the old one, not an edit. So the candidate set is the latest row
+// per URL - parsing an older one would overwrite staging with content the
+// source has already moved past.
+const LATEST_PAGES = `select distinct on (url_hash) id, url, url_hash, source_id, extracted, fetched_at
+     from crawler.raw_pages
+    where extracted is not null
+    order by url_hash, fetched_at desc`;
+
+// What makes a row pending is "staging is not already built from THIS row", not
+// "staging has heard of this URL". The old test could never be false once a URL
+// had been parsed, which is why a source editing a recipe needed `--force` to
+// reach the app.
+//
+// One definition, used by the stage and by the console's backlog count, so the
+// badge cannot report a queue the stage would not work through.
+const PENDING = `not exists (
+        select 1 from crawler.recipe_staging s
+         where s.url_hash = l.url_hash
+           and (s.raw_page_id = l.id or s.edited_by_human)
+      )`;
+
+/** How many pages `parseAll` would pick up right now, ignoring any limit. */
+export async function countPendingParse(): Promise<number> {
+  const rows = await query<{ count: number }>(
+    `with latest as (${LATEST_PAGES})
+     select count(*)::int as count from latest l where ${PENDING}`,
+  );
+  return rows[0]?.count ?? 0;
+}
+
 /**
  * Stage 1: raw_pages -> recipe_staging. Purely deterministic, so it is safe to
  * re-run over the whole table any time you improve a parser.
  */
 export async function parseAll(limit: number, force = false): Promise<number> {
   const pages = await query<RawPageRow>(
-    `select r.id, r.url, r.url_hash, r.source_id, r.extracted
-       from crawler.raw_pages r
-      where r.extracted is not null
-        ${force ? '' : 'and not exists (select 1 from crawler.recipe_staging s where s.url_hash = r.url_hash)'}
-      order by r.fetched_at desc
+    `with latest as (${LATEST_PAGES})
+     select l.id, l.url, l.url_hash, l.source_id, l.extracted
+       from latest l
+      ${force ? '' : `where ${PENDING}`}
+      order by l.fetched_at desc
       limit $1`,
     [limit],
   );
@@ -86,6 +117,18 @@ async function parseOne(page: RawPageRow): Promise<void> {
        source_review_count= excluded.source_review_count,
        ingredients        = excluded.ingredients,
        steps              = excluded.steps,
+       -- New raw page behind this URL means the source changed the recipe, so
+       -- the enrichment describing the OLD steps is not just stale, it is
+       -- wrong: its timers and step-to-ingredient indices point into an array
+       -- that no longer exists. Clearing it puts the row back in front of
+       -- the enrich stage. A re-parse of the same page (--force) keeps it, so
+       -- improving a parser does not re-buy the whole corpus.
+       enriched           = case when crawler.recipe_staging.raw_page_id is distinct from excluded.raw_page_id
+                                 then null else crawler.recipe_staging.enriched end,
+       enrichment_version = case when crawler.recipe_staging.raw_page_id is distinct from excluded.raw_page_id
+                                 then null else crawler.recipe_staging.enrichment_version end,
+       enrichment_model   = case when crawler.recipe_staging.raw_page_id is distinct from excluded.raw_page_id
+                                 then null else crawler.recipe_staging.enrichment_model end,
        status             = 'parsed',
        parsed_at          = now()
      where crawler.recipe_staging.edited_by_human = false`,

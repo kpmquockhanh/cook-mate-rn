@@ -1,0 +1,85 @@
+- id: "1"
+  title: Correct robots.txt handling and per-host pacing
+  description: >-
+    Deliver CAP-1 and CAP-2 — end-anchored Disallow patterns, correctly scoped
+    and unioned user-agent groups, and a host gate that releases on response
+    completion. Covers the CAP-11 tests for both modules.
+  done_checkpoint: true
+  invoke_dev_with: >-
+    Fixing the dead `$` anchor and the prefix-based user-agent match makes the
+    crawler strictly more restricted, not less. Report which currently-queued
+    URLs become disallowed rather than silently dropping them. Defects 1-4 in
+    current-defects.md give the exact locations. Tests must run without network
+    or database.
+
+- id: "2"
+  title: Stop discovery paying for the same fetch twice
+  description: >-
+    Deliver CAP-8 and CAP-12 — discovery skips URLs already stored, stores every
+    page it does fetch, and reads gzipped sitemaps instead of downloading them to
+    discard them.
+  invoke_dev_with: >-
+    Ingest every page discovery fetches, including ones no extractor recognised:
+    that population is Tier D's input, and today it is discarded because
+    `ingestFetchedPage` sits inside `if (recipe)`. Check against already-stored
+    URLs before spending a fetch — the current `seen` set is per-run memory only.
+    The `.gz` check must happen before the fetch, not after.
+
+- id: "3"
+  title: Move raw page HTML to object storage
+  description: >-
+    Deliver CAP-9 — fetched HTML moves out of the `raw_pages.html` column into
+    object storage, with the row keeping the reference and the content hash.
+    Introduces the page-HTML accessor story 4 consumes.
+  invoke_dev_with: >-
+    Supabase Storage, same project as auth and the app tables; no separate
+    provider. `crawler.raw_pages` keeps the reference and `content_hash`, and the
+    `html` column goes away. Existing rows must be migrated, not stranded. Land a
+    single accessor for reading a stored page back — story 4 depends on it, and
+    no caller should know where the bytes live. `raw_pages` stays append-only.
+
+- id: "4"
+  title: Tier D — extract recipes from unstructured pages
+  description: >-
+    Deliver CAP-6 — an LLM tier that runs when JSON-LD, microdata and adapters
+    all miss, so a plain-prose food blog becomes a publishable source. Completes
+    the CAP-11 fixture coverage.
+  invoke_dev_with: >-
+    Input is a page the engine already fetched, never a live source URL; read it
+    through the accessor from story 3. Output is `ExtractedRecipe` exactly as
+    tiers A-C produce it, so `parse` must not learn Tier D exists. Version-stamp
+    results and follow the selection pattern in `enrich/run.ts:24-33` so a prompt
+    change re-runs the corpus without re-crawling. Never invent an ingredient or
+    step the page does not contain. Tier D runs only after A, B and C have missed,
+    and needs a per-run budget ceiling. Open question still unresolved: the model
+    choice, the budget cap, and whether Tier D output should route to `review`
+    rather than being eligible for `approved` — settle it before implementing.
+
+- id: "5"
+  title: Freshness — recrawl intervals, conditional requests, stale locks
+  description: >-
+    Deliver CAP-3, CAP-4 and CAP-5 — per-source recrawl scheduling, ETag and
+    Last-Modified handling with Retry-After backoff, and reclamation of queue rows
+    stranded in `fetching`.
+  invoke_dev_with: >-
+    Recrawl interval is per-source policy on `crawler.sources`, alongside
+    `crawl_delay_ms` and `allow_image_use` — not a global setting and not derived
+    from sitemap `lastmod`. The blocker is that `crawl_queue.url_hash` is globally
+    unique and `enqueue` is `on conflict do nothing`, so a URL that reached `done`
+    can never be re-queued; `parse` also filters on `not exists (staging where
+    url_hash)`, so a changed page must reach staging without `--force`.
+    `raw_pages` stays append-only — a changed page is a new row keyed by content
+    hash. `locked_at` is already written and read by nothing; give it a lease
+    window rather than adding a new column.
+
+- id: "6"
+  title: Record and surface per-run crawl counters
+  description: >-
+    Deliver CAP-10 — durable per-run counters for pages fetched, status
+    distribution, extraction outcome by tier, robots skips and failure reasons,
+    with the trend across runs visible in the operator console.
+  invoke_dev_with: >-
+    Counters must survive process exit; the job runner's in-memory state is not
+    the store, and `extractionReport()` aggregates current table state rather than
+    a run. The question this has to answer is "did last night's crawl get worse",
+    so runs must be comparable to each other, not just readable individually.

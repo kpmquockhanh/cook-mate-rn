@@ -26,6 +26,12 @@ export const MAPPING = {
       reviewCount: 'review_count',
       category: 'category',
       cuisine: 'cuisine',
+      // Derived at publish time by publish/facets.ts - see migration 0012.
+      totalTimeSeconds: 'total_time_seconds',
+      activeTimeSeconds: 'active_time_seconds',
+      meal: 'meal',
+      mainIngredient: 'main_ingredient',
+      diet: 'diet',
       sourceUrl: 'source_url',
       sourceName: 'source_name',
       sourceLicense: 'source_license',

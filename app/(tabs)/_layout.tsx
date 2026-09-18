@@ -4,14 +4,20 @@ import '../../global.css';
 import BlurTabBackground from 'components/Tabs/BlurTabBackground';
 import SpecialTabBarButton from 'components/Tabs/SpecialTabBarButton';
 import TimerTabIcon from 'components/Tabs/TimerTabIcon';
+import { useTranslation } from '../../lib/i18n';
+import { TAB_BAR_HEIGHT, TAB_SCENE_INSET } from '../../lib/navigationRoutes';
 
 export default function TabLayout() {
-  return (    
+  const { t } = useTranslation();
+
+  return (
     <Tabs
       screenOptions={{
         headerShown: false,
-        animation: 'shift',
-        tabBarActiveTintColor: '#FF6B6B',
+        // #FF6B6B (used elsewhere for gradients/badges) is lighter in
+        // luminance than the #999 inactive tint, so it reads as washed-out
+        // against a white bar instead of standing out as the active state.
+        tabBarActiveTintColor: '#EA4C4C',
         tabBarInactiveTintColor: '#999',
         tabBarStyle: {
           borderTopWidth: 0,
@@ -19,14 +25,14 @@ export default function TabLayout() {
           bottom: 0,
           elevation: 0, // Remove shadow on Android
           paddingTop: 10,
-          height: 80,
+          height: TAB_BAR_HEIGHT,
           borderTopLeftRadius: 30,
           borderTopRightRadius: 30,
           backgroundColor: 'transparent',
         },
         tabBarBackground: () => <BlurTabBackground />,
         sceneStyle: {
-          marginBottom: 40,
+          marginBottom: TAB_SCENE_INSET,
         },
         headerStyle: {
           // backgroundColor: 'white',
@@ -45,30 +51,27 @@ export default function TabLayout() {
         headerTitleAlign: 'center',
         headerShadowVisible: false,
         headerTintColor: '#333',
-      }}
-    >
+      }}>
       <Tabs.Screen
-        name="index"
+        name="(home)"
         options={{
-          title: 'Home',
-          headerTitle: 'Recipe Hub',
+          title: t('tabs.home'),
+          headerTitle: t('tabs.homeHeader'),
           headerShown: false,
-          tabBarIcon: ({ size, color }) => (
-            <MaterialIcons size={size} name="home" color={color} />
-          ),
+          tabBarIcon: ({ size, color }) => <MaterialIcons size={size} name="home" color={color} />,
         }}
       />
       <Tabs.Screen
         name="shopping"
         options={{
-          title: 'Shopping',
-          headerTitle: 'Shopping List',
+          title: t('tabs.shopping'),
+          headerTitle: t('tabs.shoppingHeader'),
           tabBarIcon: ({ size, color }) => (
             <MaterialIcons size={size} name="shopping-cart" color={color} />
           ),
         }}
       />
-     
+
       <Tabs.Screen
         name="record"
         options={{
@@ -81,11 +84,11 @@ export default function TabLayout() {
           },
         }}
       />
-       <Tabs.Screen
+      <Tabs.Screen
         name="timer"
         options={{
-          title: 'Timer',
-          headerTitle: 'Cooking Timer',
+          title: t('tabs.timer'),
+          headerTitle: t('tabs.timerHeader'),
           tabBarIcon: ({ size, color, focused }) => (
             <TimerTabIcon size={size} color={color} focused={focused} />
           ),
@@ -94,13 +97,13 @@ export default function TabLayout() {
       <Tabs.Screen
         name="settings"
         options={{
-          title: 'Settings',
-          headerTitle: 'Settings',
+          title: t('tabs.settings'),
+          headerTitle: t('tabs.settings'),
           tabBarIcon: ({ size, color }) => (
             <MaterialIcons size={size} name="settings" color={color} />
           ),
         }}
       />
-      </Tabs>
+    </Tabs>
   );
 }

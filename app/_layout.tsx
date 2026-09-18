@@ -1,13 +1,19 @@
 import type { ReactNode } from 'react';
-import { View, ActivityIndicator, Platform, StyleSheet } from 'react-native';
+import { View, ActivityIndicator, Platform, StyleSheet, LogBox } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AuthProvider, useAuth } from '../lib/AuthContext';
+import { SettingsProvider } from '../lib/SettingsContext';
 import { ShoppingProvider } from '../lib/ShoppingContext';
+import { FavoritesProvider } from '../lib/FavoritesContext';
 import Auth from '../components/Auth';
 import '../global.css';
 import { TimerProvider } from '../lib/TimerContext';
 import RootStack from '../components/RootStack';
+
+// Suppresses the in-app warning/error pill and its full-screen overlay.
+// Errors and warnings still print to the Metro/console output.
+LogBox.ignoreAllLogs();
 
 // Caps the app to a phone-width column on wide (desktop) browsers so the
 // layout keeps a mobile aspect ratio instead of stretching edge-to-edge;
@@ -67,11 +73,19 @@ export default function RootLayout() {
       <WebMobileViewport>
         <SafeAreaProvider>
           <AuthProvider>
-            <ShoppingProvider>
-              <TimerProvider>
-                <RootLayoutNav />
-              </TimerProvider>
-            </ShoppingProvider>
+            {/* Outside ShoppingProvider and TimerProvider because both the
+                timers and the screens they feed read preferences from it. */}
+            <SettingsProvider>
+              <ShoppingProvider>
+                {/* Inside AuthProvider: every favourite belongs to a signed-in
+                    user, and the API rejects the write without a session. */}
+                <FavoritesProvider>
+                  <TimerProvider>
+                    <RootLayoutNav />
+                  </TimerProvider>
+                </FavoritesProvider>
+              </ShoppingProvider>
+            </SettingsProvider>
           </AuthProvider>
         </SafeAreaProvider>
       </WebMobileViewport>

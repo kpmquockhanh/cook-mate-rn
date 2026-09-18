@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 // REST API via EXPO_PUBLIC_API_URL. apiFetch attaches the caller's Supabase
 // access token - the API rejects an unauthenticated read with a 401.
 import { apiFetch } from '../lib/api';
+import { t } from '../lib/i18n/translate';
 
 export interface RecipeListItem {
   id: string | number;
@@ -13,9 +14,24 @@ export interface RecipeListItem {
   aiScore?: number;
   image?: string;
   isFavorite?: boolean;
+  /** Facets the publisher derives (migration 0012), not guesses from the title. */
+  meal?: string;
+  mainIngredient?: string;
+  diet?: string[];
+  totalMinutes?: number;
+  /** Hands-on minutes: the total minus every unattended stretch. */
+  activeMinutes?: number;
+  /** Completed cooks in the last 30 days, across everyone. */
+  cookCount?: number;
   // Allow additional fields without forcing any
   [key: string]: unknown;
 }
+
+export type Meal = 'breakfast' | 'lunch' | 'dinner' | 'dessert' | 'snack' | 'basics';
+export type MainIngredient =
+  | 'chicken' | 'beef' | 'pork' | 'seafood' | 'pasta' | 'egg' | 'veg';
+export type Diet = 'vegetarian' | 'vegan' | 'pescatarian' | 'gluten_free';
+export type Difficulty = 'easy' | 'medium' | 'hard';
 
 export interface UseRecipesOptions {
   search?: string;
@@ -24,8 +40,25 @@ export interface UseRecipesOptions {
   orderBy?: string;
   order?: 'asc' | 'desc';
   category?: string;
-  featured?: boolean;
+
+  // Facets. Every one of these is a column the API filters on directly - the
+  // app no longer fetches a page and sifts it (see lib/recipeFacets.ts).
+  meal?: Meal;
+  mainIngredient?: MainIngredient;
+  diet?: Diet;
+  difficulty?: Difficulty;
+  cuisine?: string;
+  /** Total-time ceiling in minutes. */
+  maxMinutes?: number;
+  /** Hands-on ceiling in minutes. */
+  maxActiveMinutes?: number;
+  /** Long on the clock, short on work. The server owns both thresholds. */
+  handsOff?: boolean;
+
+  /** Most completed cooks in the last 30 days. Real usage, not a scraped rating. */
   popular?: boolean;
+  /** Only what the signed-in user has favourited. */
+  favorites?: boolean;
 }
 
 export interface UseRecipesResult<TItem = RecipeListItem> {
@@ -44,8 +77,14 @@ export interface UseRecipesResult<TItem = RecipeListItem> {
 
 const DEFAULT_LIMIT = 20;
 
+/** Seconds on the wire, minutes on screen - nothing displays seconds. */
+function minutes(seconds: unknown): number | undefined {
+  return typeof seconds === 'number' ? Math.round(seconds / 60) : undefined;
+}
+
 function mapDbRowToRecipe(row: any): RecipeListItem {
   return {
+    ...row,
     id: row.id,
     title: row.title,
     time: row.time ?? row.cooking_time ?? undefined,
@@ -54,7 +93,12 @@ function mapDbRowToRecipe(row: any): RecipeListItem {
     aiScore: typeof row.ai_score === 'number' ? row.ai_score : undefined,
     image: row.image ?? row.image_url ?? undefined,
     isFavorite: row.is_favorite ?? row.isFavorite ?? false,
-    ...row,
+    meal: row.meal ?? undefined,
+    mainIngredient: row.main_ingredient ?? undefined,
+    diet: Array.isArray(row.diet) ? row.diet : [],
+    totalMinutes: minutes(row.total_time_seconds),
+    activeMinutes: minutes(row.active_time_seconds),
+    cookCount: typeof row.cook_count === 'number' ? row.cook_count : 0,
   } as RecipeListItem;
 }
 
@@ -62,19 +106,38 @@ function mapDbRowToRecipe(row: any): RecipeListItem {
 interface Query {
   search: string;
   category: string;
-  featured: boolean;
+  meal: string;
+  mainIngredient: string;
+  diet: string;
+  difficulty: string;
+  cuisine: string;
+  maxMinutes: number;
+  maxActiveMinutes: number;
+  handsOff: boolean;
   popular: boolean;
+  favorites: boolean;
   orderBy: string;
   order: 'asc' | 'desc';
   limit: number;
 }
 
+// Absent facets are '' / 0 rather than undefined so the serialized key below
+// is stable: JSON.stringify drops undefined values, and two option objects
+// that differ only in which keys are present would otherwise share a key.
 function normalize(options?: UseRecipesOptions): Query {
   return {
     search: options?.search?.trim() ?? '',
     category: options?.category?.trim() ?? '',
-    featured: options?.featured === true,
+    meal: options?.meal ?? '',
+    mainIngredient: options?.mainIngredient ?? '',
+    diet: options?.diet ?? '',
+    difficulty: options?.difficulty ?? '',
+    cuisine: options?.cuisine?.trim() ?? '',
+    maxMinutes: options?.maxMinutes ?? 0,
+    maxActiveMinutes: options?.maxActiveMinutes ?? 0,
+    handsOff: options?.handsOff === true,
     popular: options?.popular === true,
+    favorites: options?.favorites === true,
     orderBy: options?.orderBy ?? 'created_at',
     order: options?.order === 'asc' ? 'asc' : 'desc',
     limit: options?.limit ?? DEFAULT_LIMIT,
@@ -85,8 +148,18 @@ function buildPath(query: Query, offset: number): string {
   const params = new URLSearchParams();
   if (query.search) params.set('search', query.search);
   if (query.category) params.set('category', query.category);
-  if (query.featured) params.set('featured', 'true');
+  if (query.meal) params.set('meal', query.meal);
+  if (query.mainIngredient) params.set('mainIngredient', query.mainIngredient);
+  if (query.diet) params.set('diet', query.diet);
+  if (query.difficulty) params.set('difficulty', query.difficulty);
+  if (query.cuisine) params.set('cuisine', query.cuisine);
+  if (query.maxMinutes > 0) params.set('maxMinutes', String(query.maxMinutes));
+  if (query.maxActiveMinutes > 0) {
+    params.set('maxActiveMinutes', String(query.maxActiveMinutes));
+  }
+  if (query.handsOff) params.set('handsOff', 'true');
   if (query.popular) params.set('popular', 'true');
+  if (query.favorites) params.set('favorites', 'true');
   params.set('orderBy', query.orderBy);
   params.set('order', query.order);
   params.set('limit', String(query.limit));
@@ -171,7 +244,7 @@ export function useRecipes<TItem = RecipeListItem>(
       }
     } catch (err: any) {
       if (!mountedRef.current || requestId !== requestIdRef.current) return;
-      setError(err?.message ?? 'Failed to fetch recipes');
+      setError(err?.message ?? t('error.recipesFetch'));
       // Leave the rows already on screen alone on a failed loadMore - dropping
       // them would turn a dead page into an empty list.
       if (!append) {

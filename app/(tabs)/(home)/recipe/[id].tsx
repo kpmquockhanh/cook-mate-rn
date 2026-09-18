@@ -5,9 +5,9 @@ import {
   ScrollView,
   Image,
   TouchableOpacity,
+  Pressable,
   StatusBar,
   Modal,
-  Animated,
   Alert,
   PanResponder,
   FlatList,
@@ -19,16 +19,28 @@ import {
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useShopping } from '../../lib/ShoppingContext';
-import { Note, useRecipe, type Ingredient } from '../../hooks/useRecipe';
-import { getImageUrl } from '../../utils/index';
-import { scaleIngredientAmount } from '../../utils/ingredientScaling';
+import { useShopping } from '../../../../lib/ShoppingContext';
+import { useFavorites } from '../../../../lib/FavoritesContext';
+import { reportRecipeEvent } from '../../../../lib/recipeEvents';
+import { useSettings } from '../../../../lib/SettingsContext';
+import { Note, useRecipe, type Ingredient } from '../../../../hooks/useRecipe';
+import { getImageUrl } from '../../../../utils/index';
+import { scaleIngredientAmount } from '../../../../utils/ingredientScaling';
 import { LinearGradient } from 'expo-linear-gradient';
-import { WEB_MOBILE_MAX_WIDTH } from '../_layout';
+import Reanimated, {
+  FadeIn,
+  useAnimatedStyle,
+  useSharedValue,
+  withSequence,
+  withTiming,
+} from 'react-native-reanimated';
+import { WEB_MOBILE_MAX_WIDTH } from '../../../_layout';
+import { useTranslation } from '../../../../lib/i18n';
+import { TAB_BAR_OVERLAP } from '../../../../lib/navigationRoutes';
 
 /**
  * NativeWind only registers a fixed list of react-native components for web
- * (react-native-css-interop/runtime/components.js) and `Animated.View` is not
+ * (react-native-css-interop/runtime/components.js) and animated views are not
  * on it, so className is dropped there while working fine on native. Animated
  * wrappers in this file therefore carry `style` only, with the layout classes
  * on a plain View inside.
@@ -36,6 +48,7 @@ import { WEB_MOBILE_MAX_WIDTH } from '../_layout';
 
 export default function RecipeDetailPage() {
   const router = useRouter();
+  const { t } = useTranslation();
   const { id } = useLocalSearchParams();
   const insets = useSafeAreaInsets();
   // Must be reactive, not a module-scope Dimensions snapshot: on web that
@@ -52,9 +65,11 @@ export default function RecipeDetailPage() {
   // breathe without pushing the first real content off-screen on a small phone.
   const heroHeight = Math.max(300, Math.round(width * 0.78));
   const { addRecipeItems, isLoaded: shoppingLoaded } = useShopping();
+  const { settings, isLoaded: settingsLoaded } = useSettings();
 
   // Use the new useRecipe hook
   const { data: recipeData, loading, error } = useRecipe({ id: id as string });
+  const { isFavorite: isFavoriteFor, toggle: toggleFavoriteFor } = useFavorites();
 
   const [activeTab, setActiveTab] = useState<'ingredients' | 'directions'>('ingredients');
   const [servings, setServings] = useState(recipeData?.servings || 4);
@@ -63,14 +78,23 @@ export default function RecipeDetailPage() {
   // `ingredients`/`servings` state instead would compound rounding on repeated changes.
   const [baseServings, setBaseServings] = useState(recipeData?.servings || 4);
 
-  // Animation setup
-  const slideAnim = useRef(new Animated.Value(0)).current;
-  const fadeAnim = useRef(new Animated.Value(1)).current;
-  const tabScaleAnim = useRef(new Animated.Value(1)).current;
+  // Animation setup. Reanimated throughout: an animated `style` fed by RN's
+  // legacy Animated.Value does not reach the view on iOS here (same css-interop
+  // seam as the note at the top of this file). The tab content transition keeps
+  // no animated value at all - see the note on it below.
+  const tabScale = useSharedValue(1);
+  const tabScaleStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: tabScale.get() }],
+  }));
   const [ingredients, setIngredients] = useState<Ingredient[]>(recipeData?.ingredients || []);
-  const [baseIngredients, setBaseIngredients] = useState<Ingredient[]>(recipeData?.ingredients || []);
+  const [baseIngredients, setBaseIngredients] = useState<Ingredient[]>(
+    recipeData?.ingredients || []
+  );
   const [notes, setNotes] = useState<Note[]>(recipeData?.notes || []);
-  const [isFavorite, setIsFavorite] = useState(recipeData?.isFavorite || false);
+  // The heart is shared state now (lib/FavoritesContext.tsx): the same recipe
+  // shows the same heart here, in a rail and in the list, and tapping it writes
+  // a row rather than flipping a local boolean that dies with the screen.
+  const isFavorite = isFavoriteFor(id as string, recipeData?.isFavorite === true);
   const [showScaleModal, setShowScaleModal] = useState(false);
   const [selectedImageIndex, setSelectedImageIndex] = useState(0);
 
@@ -88,6 +112,12 @@ export default function RecipeDetailPage() {
 
   const heroImage = recipeImages[selectedImageIndex] ?? recipeImages[0];
 
+  // One 'viewed' per recipe opened. Keyed on the id rather than on recipeData
+  // so a refetch does not count as a second view.
+  React.useEffect(() => {
+    if (id) reportRecipeEvent(id as string, 'viewed');
+  }, [id]);
+
   // Update ingredients when recipe data changes
   React.useEffect(() => {
     if (recipeData?.ingredients) {
@@ -102,13 +132,6 @@ export default function RecipeDetailPage() {
     if (recipeData?.servings) {
       setServings(recipeData.servings);
       setBaseServings(recipeData.servings);
-    }
-  }, [recipeData]);
-
-  // Update favorite status when recipe data changes
-  React.useEffect(() => {
-    if (recipeData?.isFavorite !== undefined) {
-      setIsFavorite(recipeData.isFavorite);
     }
   }, [recipeData]);
 
@@ -172,37 +195,53 @@ export default function RecipeDetailPage() {
     setServings(newServings);
   };
 
+  // Open the recipe at the household size from Settings. It runs once per
+  // recipe - keyed on the id, not on a boolean - so that a user who scales a
+  // recipe by hand does not have their choice undone by the next re-render,
+  // while opening a second recipe still starts from their default.
+  const scaledToDefaultFor = useRef<string | null>(null);
+  React.useEffect(() => {
+    const defaultServings = settings.defaultServings;
+    const recipeKey = recipeData?.id != null ? String(recipeData.id) : null;
+
+    if (!settingsLoaded || !recipeKey || !defaultServings) return;
+    // baseIngredients is set by its own effect; without it there is nothing to
+    // scale from and scaleServings would write an empty ingredient list.
+    if (baseIngredients.length === 0) return;
+    if (scaledToDefaultFor.current === recipeKey) return;
+
+    scaledToDefaultFor.current = recipeKey;
+    if (defaultServings !== baseServings) scaleServings(defaultServings);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settingsLoaded, settings.defaultServings, recipeData?.id, baseIngredients, baseServings]);
+
   const toggleFavorite = () => {
-    setIsFavorite(!isFavorite);
+    void toggleFavoriteFor(id as string, !isFavorite);
   };
 
   const handleAddToShoppingList = () => {
     const uncheckedIngredients = ingredients.filter((ingredient) => !ingredient.checked);
 
     if (uncheckedIngredients.length === 0) {
-      Alert.alert(
-        'All ingredients checked',
-        'All ingredients are already checked off. Would you like to add all ingredients to your shopping list?',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          {
-            text: 'Add All',
-            onPress: () => {
-              const shoppingItems = ingredients.map((ingredient) => ({
-                name: ingredient.ingredient_text,
-                quantity: ingredient.amount,
-                checked: false,
-                category: 'recipe' as const,
-              }));
-              addRecipeItems(shoppingItems, recipeData!.title);
-              Alert.alert(
-                'Success',
-                `Added ${ingredients.length} ingredients to your shopping list!`
-              );
-            },
+      Alert.alert(t('recipe.allCheckedTitle'), t('recipe.allCheckedMessage'), [
+        { text: t('common.cancel'), style: 'cancel' },
+        {
+          text: t('recipe.addAll'),
+          onPress: () => {
+            const shoppingItems = ingredients.map((ingredient) => ({
+              name: ingredient.ingredient_text,
+              quantity: ingredient.amount,
+              checked: false,
+              category: 'recipe' as const,
+            }));
+            addRecipeItems(shoppingItems, recipeData!.title);
+            Alert.alert(
+              t('recipe.addedAllTitle'),
+              t('recipe.addedAllMessage', { count: ingredients.length })
+            );
           },
-        ]
-      );
+        },
+      ]);
       return;
     }
 
@@ -216,9 +255,9 @@ export default function RecipeDetailPage() {
     addRecipeItems(shoppingItems, recipeData!.title);
 
     Alert.alert(
-      'Added to Shopping List!',
-      `${uncheckedIngredients.length} ingredient${uncheckedIngredients.length > 1 ? 's' : ''} added to your shopping list.`,
-      [{ text: 'OK' }]
+      t('recipe.addedTitle'),
+      t('recipe.addedMessage', { count: uncheckedIngredients.length }),
+      [{ text: t('common.ok') }]
     );
   };
 
@@ -226,56 +265,11 @@ export default function RecipeDetailPage() {
     if (newTab === activeTab) return;
 
     // Tab button press animation
-    Animated.sequence([
-      Animated.timing(tabScaleAnim, {
-        toValue: 0.95,
-        duration: 100,
-        useNativeDriver: true,
-      }),
-      Animated.timing(tabScaleAnim, {
-        toValue: 1,
-        duration: 100,
-        useNativeDriver: true,
-      }),
-    ]).start();
+    tabScale.set(
+      withSequence(withTiming(0.95, { duration: 100 }), withTiming(1, { duration: 100 }))
+    );
 
-    // Get the direction of animation based on tab order
-    const tabOrder = ['ingredients', 'directions'];
-    const currentIndex = tabOrder.indexOf(activeTab);
-    const newIndex = tabOrder.indexOf(newTab);
-    const direction = newIndex > currentIndex ? 1 : -1;
-
-    // Start with fade out and slide
-    Animated.parallel([
-      Animated.timing(fadeAnim, {
-        toValue: 0,
-        duration: 150,
-        useNativeDriver: true,
-      }),
-      Animated.timing(slideAnim, {
-        toValue: direction * 50,
-        duration: 150,
-        useNativeDriver: true,
-      }),
-    ]).start(() => {
-      // Change the tab content
-      setActiveTab(newTab);
-
-      // Reset position and fade in
-      slideAnim.setValue(direction * -50);
-      Animated.parallel([
-        Animated.timing(fadeAnim, {
-          toValue: 1,
-          duration: 200,
-          useNativeDriver: true,
-        }),
-        Animated.timing(slideAnim, {
-          toValue: 0,
-          duration: 200,
-          useNativeDriver: true,
-        }),
-      ]).start();
-    });
+    setActiveTab(newTab);
   };
 
   const renderStars = (rating: number) => (
@@ -298,9 +292,10 @@ export default function RecipeDetailPage() {
   );
 
   const renderImageItem = ({ item, index }: { item: string; index: number }) => (
-    <TouchableOpacity
+    <Pressable
       onPress={() => setSelectedImageIndex(index)}
-      activeOpacity={0.85}
+      accessibilityRole="button"
+      accessibilityState={{ selected: selectedImageIndex === index }}
       className="mr-3 overflow-hidden rounded-2xl"
       style={{
         width: 72,
@@ -309,7 +304,7 @@ export default function RecipeDetailPage() {
         borderColor: selectedImageIndex === index ? '#ff6b6b' : 'transparent',
       }}>
       <Image source={{ uri: getImageUrl(item) }} className="h-full w-full" resizeMode="cover" />
-    </TouchableOpacity>
+    </Pressable>
   );
 
   // Circular control that stays legible over any photo.
@@ -333,7 +328,7 @@ export default function RecipeDetailPage() {
         <StatusBar barStyle="dark-content" />
         <ActivityIndicator size="large" color="#ff6b6b" />
         <Text className="mt-4 text-base text-gray-500">
-          {loading ? 'Loading recipe…' : 'Loading shopping list…'}
+          {loading ? t('recipe.loading') : t('recipe.loadingShoppingList')}
         </Text>
       </View>
     );
@@ -345,10 +340,12 @@ export default function RecipeDetailPage() {
       <View className="flex-1 items-center justify-center bg-white px-6">
         <StatusBar barStyle="dark-content" />
         <Ionicons name="alert-circle-outline" size={64} color="#EF4444" />
-        <Text className="mb-2 mt-4 text-xl font-semibold text-gray-800">Error Loading Recipe</Text>
+        <Text className="mb-2 mt-4 text-xl font-semibold text-gray-800">
+          {t('recipe.loadError')}
+        </Text>
         <Text className="mb-6 text-center text-gray-600">{error}</Text>
         <TouchableOpacity className="rounded-lg bg-primary px-6 py-3" onPress={() => router.back()}>
-          <Text className="font-semibold text-white">Go Back</Text>
+          <Text className="font-semibold text-white">{t('common.goBack')}</Text>
         </TouchableOpacity>
       </View>
     );
@@ -359,9 +356,9 @@ export default function RecipeDetailPage() {
     return (
       <View className="flex-1 items-center justify-center bg-white">
         <StatusBar barStyle="dark-content" />
-        <Text className="mb-4 text-lg text-gray-600">Recipe not found</Text>
+        <Text className="mb-4 text-lg text-gray-600">{t('recipe.notFound')}</Text>
         <TouchableOpacity className="rounded-lg bg-primary px-6 py-3" onPress={() => router.back()}>
-          <Text className="font-semibold text-white">Go Back</Text>
+          <Text className="font-semibold text-white">{t('common.goBack')}</Text>
         </TouchableOpacity>
       </View>
     );
@@ -397,7 +394,7 @@ export default function RecipeDetailPage() {
       <ScrollView
         className="flex-1"
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: insets.bottom + 32 }}>
+        contentContainerStyle={{ paddingBottom: TAB_BAR_OVERLAP + 32 }}>
         {/* Hero */}
         <View style={{ height: heroHeight }}>
           {heroImage ? (
@@ -447,7 +444,7 @@ export default function RecipeDetailPage() {
                 </Text>
                 {recipeData.reviewCount > 0 && (
                   <Text className="ml-1 text-sm text-white/70">
-                    ({recipeData.reviewCount} reviews)
+                    {t('recipe.reviewCount', { count: recipeData.reviewCount })}
                   </Text>
                 )}
               </View>
@@ -471,7 +468,7 @@ export default function RecipeDetailPage() {
             <Text className="mt-1 text-sm font-semibold text-gray-800">
               {recipeData.cookingTime}
             </Text>
-            <Text className="text-xs text-gray-400">Total time</Text>
+            <Text className="text-xs text-gray-400">{t('recipe.totalTime')}</Text>
           </View>
 
           <View className="w-px bg-gray-100" />
@@ -482,7 +479,7 @@ export default function RecipeDetailPage() {
             onPress={() => setShowScaleModal(true)}>
             <Ionicons name="people-outline" size={22} color="#ff6b6b" />
             <Text className="mt-1 text-sm font-semibold text-gray-800">{servings}</Text>
-            <Text className="text-xs text-gray-400">Servings</Text>
+            <Text className="text-xs text-gray-400">{t('recipe.servings')}</Text>
           </TouchableOpacity>
 
           <View className="w-px bg-gray-100" />
@@ -492,7 +489,7 @@ export default function RecipeDetailPage() {
             <Text className="mt-1 text-sm font-semibold capitalize text-gray-800">
               {difficulty || '—'}
             </Text>
-            <Text className="text-xs text-gray-400">Difficulty</Text>
+            <Text className="text-xs text-gray-400">{t('recipe.difficulty')}</Text>
           </View>
 
           {aiScore !== undefined && (
@@ -504,7 +501,7 @@ export default function RecipeDetailPage() {
                 <Text className="mt-1 text-sm font-semibold text-gray-800">
                   {aiScore.toFixed(1)}
                 </Text>
-                <Text className="text-xs text-gray-400">AI Score</Text>
+                <Text className="text-xs text-gray-400">{t('recipe.aiScore')}</Text>
               </View>
             </>
           )}
@@ -518,7 +515,7 @@ export default function RecipeDetailPage() {
         {recipeImages.length > 1 && (
           <View className="pt-5">
             <Text className="mb-3 px-5 text-base font-semibold text-gray-800">
-              Photos ({recipeImages.length})
+              {t('recipe.photos', { count: recipeImages.length })}
             </Text>
             <FlatList
               data={recipeImages}
@@ -547,49 +544,67 @@ export default function RecipeDetailPage() {
               paddingVertical: 16,
             }}>
             <Ionicons name="play-circle" size={22} color="white" />
-            <Text className="ml-2 text-lg font-semibold text-white">Start Cooking</Text>
+            <Text className="ml-2 text-lg font-semibold text-white">
+              {t('recipe.startCooking')}
+            </Text>
           </LinearGradient>
         </TouchableOpacity>
 
         {/* Tabs */}
-        <Animated.View style={{ transform: [{ scale: tabScaleAnim }] }}>
+        <Reanimated.View style={tabScaleStyle}>
           <View className="mx-5 mt-6 flex-row rounded-2xl bg-gray-100 p-1">
             {(['ingredients', 'directions'] as const).map((tab) => (
-              <TouchableOpacity
+              /* Pressable rather than TouchableOpacity: switchTab re-renders this
+                 button with a new style, which strands TouchableOpacity's
+                 fade-back animation and leaves the active tab washed out. Keep
+                 the style a plain object/array -- NativeWind's jsx runtime
+                 (jsxImportSource in babel.config.js) ignores the
+                 ({ pressed }) => [] form. */
+              <Pressable
                 key={tab}
                 onPress={() => switchTab(tab)}
+                accessibilityRole="tab"
+                accessibilityState={{ selected: activeTab === tab }}
                 className="flex-1 rounded-xl py-3"
                 style={
                   activeTab === tab
                     ? {
-                        backgroundColor: 'white',
-                        shadowColor: '#000',
-                        shadowOffset: { width: 0, height: 1 },
-                        shadowOpacity: 0.1,
-                        shadowRadius: 2,
+                        backgroundColor: '#ff6b6b',
+                        shadowColor: '#ff6b6b',
+                        shadowOffset: { width: 0, height: 2 },
+                        shadowOpacity: 0.3,
+                        shadowRadius: 4,
                         elevation: 2,
                       }
                     : { backgroundColor: 'transparent' }
                 }>
                 <Text
-                  className="text-center text-sm font-semibold capitalize"
-                  style={{ color: activeTab === tab ? '#ff6b6b' : '#6B7280' }}>
-                  {tab}
+                  className="text-center text-sm font-semibold"
+                  style={{ color: activeTab === tab ? 'white' : '#6B7280' }}>
+                  {tab === 'ingredients' ? t('recipe.tabIngredients') : t('recipe.tabDirections')}
                 </Text>
-              </TouchableOpacity>
+              </Pressable>
             ))}
           </View>
-        </Animated.View>
+        </Reanimated.View>
 
         {/* Tab Content */}
-        <Animated.View style={{ opacity: fadeAnim, transform: [{ translateX: slideAnim }] }}>
+        {/* Reanimated, not RN's Animated: driving `opacity` from an
+            Animated.Value on a legacy Animated.View left the content stuck at
+            opacity 0 on iOS while working on web (same css-interop seam as the
+            note at the top of this file). A declarative entering animation owns
+            no opacity value that a re-render can strand, and `key` remounts the
+            subtree per tab so it always runs. */}
+        <Reanimated.View key={activeTab} entering={FadeIn.duration(180)}>
           <View className="px-5 pb-4 pt-5">
             {activeTab === 'ingredients' && (
               <View>
                 <View className="mb-1 flex-row items-baseline justify-between">
-                  <Text className="text-xl font-semibold text-gray-800">Ingredients</Text>
+                  <Text className="text-xl font-semibold text-gray-800">
+                    {t('recipe.tabIngredients')}
+                  </Text>
                   <Text className="text-sm text-gray-400">
-                    {ingredients.length} items · {servings} servings
+                    {t('recipe.ingredientsSummary', { items: ingredients.length, servings })}
                   </Text>
                 </View>
 
@@ -632,13 +647,15 @@ export default function RecipeDetailPage() {
                   onPress={handleAddToShoppingList}>
                   <Ionicons name="bag-outline" size={22} color="#374151" />
                   <Text className="ml-3 text-base font-medium text-gray-700">
-                    Add to Shopping List
+                    {t('recipe.addToShoppingList')}
                   </Text>
                 </TouchableOpacity>
 
                 {notes.length > 0 && (
                   <View className="mt-8">
-                    <Text className="mb-3 text-xl font-semibold text-gray-800">Notes</Text>
+                    <Text className="mb-3 text-xl font-semibold text-gray-800">
+                      {t('recipe.notes')}
+                    </Text>
                     {notes.map((note, index) => (
                       <View
                         key={note.id ?? index}
@@ -657,9 +674,11 @@ export default function RecipeDetailPage() {
             {activeTab === 'directions' && (
               <View>
                 <View className="mb-1 flex-row items-baseline justify-between">
-                  <Text className="text-xl font-semibold text-gray-800">Directions</Text>
+                  <Text className="text-xl font-semibold text-gray-800">
+                    {t('recipe.tabDirections')}
+                  </Text>
                   <Text className="text-sm text-gray-400">
-                    {recipeData.instructions.length} steps
+                    {t('recipe.stepCount', { count: recipeData.instructions.length })}
                   </Text>
                 </View>
 
@@ -678,7 +697,9 @@ export default function RecipeDetailPage() {
                         <View className="mt-2 flex-row items-center self-start rounded-full bg-gray-100 px-3 py-1">
                           <Ionicons name="timer-outline" size={14} color="#6B7280" />
                           <Text className="ml-1 text-xs font-medium text-gray-600">
-                            {Math.round(instruction.duration / 60)} min
+                            {t('duration.minutes', {
+                              count: Math.round(instruction.duration / 60),
+                            })}
                             {instruction.timerName ? ` · ${instruction.timerName}` : ''}
                           </Text>
                         </View>
@@ -695,7 +716,9 @@ export default function RecipeDetailPage() {
                 activeOpacity={sourceUrl ? 0.6 : 1}
                 disabled={!sourceUrl}
                 onPress={() => sourceUrl && Linking.openURL(sourceUrl)}>
-                <Text className="text-xs text-gray-400">Recipe from {sourceName}</Text>
+                <Text className="text-xs text-gray-400">
+                  {t('recipe.source', { source: sourceName })}
+                </Text>
                 {sourceUrl ? (
                   <Ionicons
                     name="open-outline"
@@ -707,7 +730,7 @@ export default function RecipeDetailPage() {
               </TouchableOpacity>
             ) : null}
           </View>
-        </Animated.View>
+        </Reanimated.View>
       </ScrollView>
 
       {/* Scale Recipe Modal */}
@@ -721,19 +744,21 @@ export default function RecipeDetailPage() {
             className="rounded-t-3xl bg-white p-6"
             style={{ paddingBottom: insets.bottom + 24 }}>
             <View className="mb-6 flex-row items-center justify-between">
-              <Text className="text-xl font-semibold text-gray-800">Scale Recipe</Text>
+              <Text className="text-xl font-semibold text-gray-800">{t('recipe.scaleTitle')}</Text>
               <TouchableOpacity onPress={() => setShowScaleModal(false)}>
                 <Ionicons name="close" size={24} color="#6B7280" />
               </TouchableOpacity>
             </View>
 
-            <Text className="mb-4 text-center text-gray-600">Select number of servings</Text>
+            <Text className="mb-4 text-center text-gray-600">{t('recipe.scalePrompt')}</Text>
 
             <View className="mb-6 flex-row items-center justify-around">
               {[2, 4, 6, 8].map((count) => (
-                <TouchableOpacity
+                <Pressable
                   key={count}
                   onPress={() => scaleServings(count)}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: servings === count }}
                   className={`h-12 w-12 items-center justify-center rounded-full ${
                     servings === count ? 'bg-primary' : 'bg-gray-100'
                   }`}>
@@ -743,14 +768,16 @@ export default function RecipeDetailPage() {
                     }`}>
                     {count}
                   </Text>
-                </TouchableOpacity>
+                </Pressable>
               ))}
             </View>
 
             <TouchableOpacity
               onPress={() => setShowScaleModal(false)}
               className="rounded-2xl bg-primary py-4">
-              <Text className="text-center text-lg font-semibold text-white">Update Recipe</Text>
+              <Text className="text-center text-lg font-semibold text-white">
+                {t('recipe.scaleConfirm')}
+              </Text>
             </TouchableOpacity>
           </View>
         </View>

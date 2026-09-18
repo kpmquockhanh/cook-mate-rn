@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { classifyUrl, extractLinks, parseSitemap } from '../src/crawl/discover.js';
+import { gzipSync } from 'node:zlib';
+import { classifyUrl, decodeSitemap, extractLinks, parseSitemap } from '../src/crawl/discover.js';
 
 test('classifies the URL shapes a recipe site actually uses', () => {
   // Named recipe section plus a slug: the high-confidence case, queued without
@@ -91,4 +92,32 @@ test('resolves page links the way a browser would', () => {
   assert.ok(links.some((l) => l.includes('cdn.example.com')));
   assert.ok(!links.some((l) => l.startsWith('mailto:') || l.startsWith('javascript:')));
   assert.ok(!links.some((l) => l.includes('#')));
+});
+
+test('a gzipped sitemap is read, not discarded', () => {
+  const xml =
+    '<?xml version="1.0"?><urlset><url><loc>https://example.com/recipes/pho-bo</loc></url>' +
+    '<url><loc>https://example.com/recipes/banh-mi</loc></url></urlset>';
+
+  // Served as `application/gzip`: raw deflate bytes `fetch` has not touched.
+  const gzipped = gzipSync(Buffer.from(xml, 'utf8'));
+  assert.equal(decodeSitemap(new Uint8Array(gzipped)), xml);
+
+  // Served as `Content-Encoding: gzip`: already decompressed by the time we see
+  // it. Keying on the magic number rather than the `.gz` in the URL means both
+  // arrive at the same place.
+  assert.equal(decodeSitemap(new Uint8Array(Buffer.from(xml, 'utf8'))), xml);
+
+  const { pageUrls } = parseSitemap(decodeSitemap(new Uint8Array(gzipped)));
+  assert.deepEqual(pageUrls, [
+    'https://example.com/recipes/pho-bo',
+    'https://example.com/recipes/banh-mi',
+  ]);
+});
+
+test('an empty or truncated body decodes to something parseSitemap can refuse', () => {
+  assert.equal(decodeSitemap(new Uint8Array([])), '');
+  const { nested, pageUrls } = parseSitemap(decodeSitemap(new Uint8Array([])));
+  assert.deepEqual(nested, []);
+  assert.deepEqual(pageUrls, []);
 });

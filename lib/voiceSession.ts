@@ -9,6 +9,8 @@
  * looked identical to a session that was simply still starting up.
  */
 
+import type { Translator, TranslationKey } from './i18n';
+
 /** Statuses the LiveKitVoice component itself reports. */
 export type VoiceSessionStatus =
   /** Credentials in hand, not connected. The user starts it from here. */
@@ -22,13 +24,18 @@ export type VoiceSessionStatus =
   | 'mic-denied'
   | 'error';
 
-/** The session statuses plus the two the screen owns while minting a token. */
+/** The session statuses plus the three the screen owns before one can start. */
 export type VoiceStatus =
   | VoiceSessionStatus
   /** Fetching LiveKit credentials. */
   | 'preparing'
   /** Credentials could not be obtained, so there is nothing to connect to. */
-  | 'unavailable';
+  | 'unavailable'
+  /**
+   * Switched off in Settings. Distinct from 'unavailable': nothing is wrong,
+   * no token is minted, and the remedy is a preference rather than a retry.
+   */
+  | 'disabled';
 
 export type VoiceTone = 'neutral' | 'active' | 'warn' | 'error';
 
@@ -46,13 +53,16 @@ export type VoiceIcon =
  * State and remedy are kept apart so the underlying error can be slotted
  * between them. Folded into one string they compete: either the reason is lost
  * or the user is told what happened and not what to do about it.
+ *
+ * The two are translation keys rather than text: this table is read while
+ * rendering, so the wording has to follow whatever language is current then.
  */
 interface StatusCopy {
   icon: VoiceIcon;
   /** The state, in the user's terms. Never mentions LiveKit or a worker. */
-  state: string;
+  stateKey: TranslationKey;
   /** What they can do about it, if anything. */
-  action?: string;
+  actionKey?: TranslationKey;
   tone: VoiceTone;
   /** Whether the state is one the user can retry out of. */
   canRetry: boolean;
@@ -61,55 +71,62 @@ interface StatusCopy {
 const COPY: Record<VoiceStatus, StatusCopy> = {
   preparing: {
     icon: 'ellipsis-horizontal-sharp',
-    state: 'Getting the voice assistant ready…',
+    stateKey: 'voice.preparing',
+    tone: 'neutral',
+    canRetry: false,
+  },
+  disabled: {
+    icon: 'mic-off-outline',
+    stateKey: 'voice.disabled',
+    actionKey: 'voice.disabledAction',
     tone: 'neutral',
     canRetry: false,
   },
   unavailable: {
     icon: 'cloud-offline-outline',
-    state: 'Voice assistant unavailable',
-    action: 'tap to try again',
+    stateKey: 'voice.unavailable',
+    actionKey: 'voice.unavailableAction',
     tone: 'warn',
     canRetry: true,
   },
   ready: {
     icon: 'mic-outline',
-    state: 'Voice assistant ready',
-    action: 'tap the mic to cook hands-free',
+    stateKey: 'voice.ready',
+    actionKey: 'voice.readyAction',
     tone: 'neutral',
     canRetry: false,
   },
   connecting: {
     icon: 'ellipsis-horizontal-sharp',
-    state: 'Connecting to the voice assistant…',
+    stateKey: 'voice.connecting',
     tone: 'neutral',
     canRetry: false,
   },
   listening: {
     icon: 'mic',
-    state: 'Listening',
-    action: 'say “next step”, “go back” or “repeat”',
+    stateKey: 'voice.listening',
+    actionKey: 'voice.listeningAction',
     tone: 'active',
     canRetry: false,
   },
   'no-agent': {
     icon: 'cloud-offline-outline',
-    state: 'No assistant answered',
-    action: 'use the buttons below, or tap the mic to retry',
+    stateKey: 'voice.noAgent',
+    actionKey: 'voice.noAgentAction',
     tone: 'warn',
     canRetry: true,
   },
   'mic-denied': {
     icon: 'mic-off-outline',
-    state: 'Microphone is off',
-    action: 'allow it, then tap the mic again',
+    stateKey: 'voice.micDenied',
+    actionKey: 'voice.micDeniedAction',
     tone: 'warn',
     canRetry: true,
   },
   error: {
     icon: 'alert-circle-outline',
-    state: 'Voice assistant error',
-    action: 'tap the mic to retry',
+    stateKey: 'voice.error',
+    actionKey: 'voice.errorAction',
     tone: 'error',
     canRetry: true,
   },
@@ -129,9 +146,19 @@ export interface VoiceStatusCopy {
  * rather than a shrug. It is carried into the label so the person who has to
  * report the problem can read the cause off the screen, and it is the same
  * string the logs record.
+ *
+ * The translator is passed in rather than read from the module: this runs
+ * during render, and a caller's `useTranslation` is what ties the banner to a
+ * re-render when the language changes.
  */
-export function describeVoiceStatus(status: VoiceStatus, detail?: string | null): VoiceStatusCopy {
-  const { icon, state, action, tone, canRetry } = COPY[status];
+export function describeVoiceStatus(
+  status: VoiceStatus,
+  detail: string | null | undefined,
+  t: Translator
+): VoiceStatusCopy {
+  const { icon, stateKey, actionKey, tone, canRetry } = COPY[status];
+  const state = t(stateKey);
+  const action = actionKey ? t(actionKey) : undefined;
   const label = [detail ? `${state}: ${detail}` : state, action].filter(Boolean).join(' — ');
   return { icon, label, tone, canRetry };
 }

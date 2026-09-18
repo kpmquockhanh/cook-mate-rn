@@ -1,5 +1,5 @@
 /**
- * Root stack routes, declared once and consumed by RootStack.
+ * Stack routes, declared once and consumed by RootStack.
  *
  * `transition` is platform-neutral on purpose: RootStack maps these names onto
  * expo-router's own `animation` vocabulary for the current platform.
@@ -8,15 +8,31 @@ import { router, type Href } from 'expo-router';
 
 export type ScreenTransition = 'slide' | 'fade' | 'modal';
 
-export const ROOT_SCREENS: { name: string; transition: ScreenTransition }[] = [
+export type StackScreen = { name: string; transition: ScreenTransition };
+
+// Cooking mode sits above the tabs: it has its own bottom controls, and a tab
+// bar under them would crowd the screen and invite mis-taps mid-recipe.
+export const ROOT_SCREENS: StackScreen[] = [
   { name: '(tabs)', transition: 'fade' },
-  { name: 'all-recipes', transition: 'slide' },
-  // Crossfade: the search bar is in almost the same place on both screens, so
-  // fading reads as the bar staying put while the page around it changes.
-  { name: 'search', transition: 'fade' },
-  { name: 'recipe/[id]', transition: 'slide' },
   { name: 'cooking/[id]', transition: 'modal' },
 ];
+
+// Lives inside the Home tab rather than the root stack, so the tab bar stays
+// visible on these screens.
+export const HOME_SCREENS: StackScreen[] = [
+  { name: 'index', transition: 'fade' },
+  { name: 'all-recipes', transition: 'slide' },
+  { name: 'recipe/[id]', transition: 'slide' },
+];
+
+/**
+ * The tab bar floats over the bottom of each screen: it is TAB_BAR_HEIGHT tall
+ * but screens only stop TAB_SCENE_INSET short of the bottom edge. Screens with
+ * their own bottom-anchored controls pad by the difference to clear it.
+ */
+export const TAB_BAR_HEIGHT = 80;
+export const TAB_SCENE_INSET = 40;
+export const TAB_BAR_OVERLAP = TAB_BAR_HEIGHT - TAB_SCENE_INSET;
 
 export const TRANSITION_DURATION = 280;
 

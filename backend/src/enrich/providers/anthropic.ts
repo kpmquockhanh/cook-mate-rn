@@ -2,8 +2,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
 import { env } from '../../env.js';
 import { logger } from '../../log.js';
-import { EnrichmentSchema } from '../schema.js';
-import type { EnrichProvider, ProviderRequest, ProviderResponse } from './types.js';
+import type { LlmProvider, ProviderRequest, ProviderResponse } from './types.js';
 
 const log = logger('enrich:anthropic');
 
@@ -18,16 +17,16 @@ function client(): Anthropic {
  * structurally wrong payload is not merely rejected - it cannot be generated.
  * No retry loop is needed here, which is why this file is the short one.
  */
-export const anthropicProvider: EnrichProvider = {
+export const anthropicProvider: LlmProvider = {
   name: 'anthropic',
 
-  async complete(request: ProviderRequest): Promise<ProviderResponse> {
+  async complete<T>(request: ProviderRequest<T>): Promise<ProviderResponse<T>> {
     const response = await client().messages.parse({
       model: request.model,
       max_tokens: 8000,
       system: request.system,
       output_config: {
-        format: zodOutputFormat(EnrichmentSchema),
+        format: zodOutputFormat(request.schema),
         // `effort` is rejected by Haiku 4.5, so only send it on the escalation tier.
         ...(request.escalate ? { effort: 'medium' as const } : {}),
       },
@@ -35,7 +34,7 @@ export const anthropicProvider: EnrichProvider = {
     });
 
     if (response.stop_reason === 'max_tokens') {
-      throw new Error('enrichment truncated at max_tokens - recipe too long for one call');
+      throw new Error('response truncated at max_tokens - input too long for one call');
     }
     if (!response.parsed_output) {
       throw new Error(`model returned unparseable output (stop_reason=${response.stop_reason})`);
@@ -44,6 +43,8 @@ export const anthropicProvider: EnrichProvider = {
     log.debug(
       `${request.model}: ${response.usage.input_tokens} in / ${response.usage.output_tokens} out`,
     );
-    return { payload: response.parsed_output, model: request.model };
+    // `zodOutputFormat` widens to the schema's own inferred type; the generic
+    // is what the caller asked for and the SDK already validated against it.
+    return { payload: response.parsed_output as T, model: request.model };
   },
 };

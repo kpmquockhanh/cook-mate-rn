@@ -59,6 +59,10 @@ export const env = {
   get databaseUrl() {
     return required('DATABASE_URL');
   },
+  // A Supabase pooler in a distant region can take several seconds to accept a
+  // connection. Too tight a timeout does not protect anything - it just turns
+  // ordinary latency into a failed request.
+  dbConnectTimeoutMs: int('DB_CONNECT_TIMEOUT_MS', 30000),
   get anthropicApiKey() {
     return required('ANTHROPIC_API_KEY');
   },
@@ -81,12 +85,35 @@ export const env = {
     return resolveModel('ENRICH_ESCALATION_MODEL', key, PROVIDER_MODELS[key].escalation);
   },
   enrichmentVersion: int('ENRICHMENT_VERSION', 1),
+
+  // ---- Tier D extraction (src/crawl/prose.ts) ----
+  // Reads pages the free tiers could not, so it costs money per page and is
+  // budgeted rather than run over everything.
+  get extractModel() {
+    const key = provider();
+    return resolveModel('EXTRACT_MODEL', key, PROVIDER_MODELS[key].model);
+  },
+  // Bump to re-run extraction over stored pages after changing the prompt -
+  // the same lever ENRICHMENT_VERSION is for the stage after it.
+  extractionVersion: int('EXTRACTION_VERSION', 1),
+  // A hard ceiling per run, independent of --limit, so a mistyped limit cannot
+  // spend the month's budget in one command.
+  extractMaxPagesPerRun: int('EXTRACT_MAX_PAGES_PER_RUN', 200),
+  // Page text sent to the model. Recipes sit well inside this; the cap is
+  // there so one pathological page cannot cost twenty normal ones.
+  extractMaxChars: int('EXTRACT_MAX_CHARS', 24000),
   userAgent:
     process.env.CRAWL_USER_AGENT ??
     'CookMateBot/1.0 (+https://cookmate.app/bot; contact@cookmate.app)',
   crawlConcurrency: int('CRAWL_CONCURRENCY', 4),
   crawlDefaultDelayMs: int('CRAWL_DEFAULT_DELAY_MS', 2000),
   crawlTimeoutMs: int('CRAWL_TIMEOUT_MS', 20000),
+  // How long a claimed queue row may stay 'fetching' before the next run
+  // assumes the worker holding it died and takes it back.
+  crawlLockLeaseMinutes: int('CRAWL_LOCK_LEASE_MINUTES', 15),
+  // A server asking us to wait can ask for a long time. Honour it, but not
+  // past the point where the run is just sleeping.
+  crawlMaxRetryAfterMs: int('CRAWL_MAX_RETRY_AFTER_MS', 300000),
   qualityMinScore: int('QUALITY_MIN_SCORE', 70),
   reviewPort: int('REVIEW_PORT', 5174),
   // 127.0.0.1 by default: the console has no business being reachable from
@@ -111,6 +138,30 @@ export const env = {
   // Legacy HS256 project JWT secret. Not the publishable key and not the
   // service-role key - those are API keys, not signing material.
   supabaseJwtSecret: process.env.SUPABASE_JWT_SECRET,
+
+  // ---- Raw page storage (src/storage/pages.ts) ----
+  // Crawled HTML lives in object storage, not in a Postgres column: it is the
+  // largest thing the pipeline keeps and the least often read.
+  //
+  // The service-role key, not the publishable one - the crawler writes to a
+  // bucket the app's users have no access to.
+  supabaseServiceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY,
+  rawPageBucket: process.env.RAW_PAGE_BUCKET ?? 'raw-pages',
+  // `file` keeps pages on disk instead, for local work and for tests, which
+  // must not need a Supabase project to run. Deployments use the default.
+  rawPageStore: (process.env.RAW_PAGE_STORE ?? 'supabase').toLowerCase(),
+  rawPageDir: process.env.RAW_PAGE_DIR ?? '.raw-pages',
+
+  // ---- Recipe images (src/storage/images.ts) ----
+  // A PUBLIC bucket, unlike raw pages: the app loads these straight from an
+  // <Image> tag with no session, and EXPO_PUBLIC_STORAGE_URL points at it.
+  recipeImageBucket: process.env.RECIPE_IMAGE_BUCKET ?? 'recipe-images',
+  // Recipe photos are hero shots, not posters. Anything larger is a mistake -
+  // a PDF, a video, a page served as an image - and not worth the bandwidth.
+  imageMaxBytes: int('IMAGE_MAX_BYTES', 8 * 1024 * 1024),
+  // How many photos per recipe to mirror. The first is the thumbnail; the rest
+  // fill the detail screen's gallery, which shows a handful at most.
+  imagesPerRecipe: int('IMAGES_PER_RECIPE', 5),
 
   // 0.0.0.0 so a phone running the Expo app can reach it over the LAN. The
   // review UI binds localhost on purpose; this one is meant to be called.

@@ -16,6 +16,8 @@ interface SeedEntry {
   grams_per_unit?: Record<string, number>;
   density_g_per_ml?: number;
   is_pantry_staple?: boolean;
+  /** meat | seafood | dairy | egg | animal | gluten - see migration 0012. */
+  dietary_tags?: string[];
 }
 
 // ESM: __dirname does not exist. Derive the path from import.meta.url.
@@ -35,8 +37,8 @@ export async function seedCanonical(filePath = SEED_PATH): Promise<number> {
     await query(
       `insert into crawler.ingredients_canonical
          (slug, display_name, aliases, category, default_unit, grams_per_unit,
-          density_g_per_ml, is_pantry_staple)
-       values ($1, $2, $3, $4, $5, $6, $7, $8)
+          density_g_per_ml, is_pantry_staple, dietary_tags)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
        on conflict (slug) do update set
          display_name     = excluded.display_name,
          aliases          = excluded.aliases,
@@ -44,7 +46,8 @@ export async function seedCanonical(filePath = SEED_PATH): Promise<number> {
          default_unit     = excluded.default_unit,
          grams_per_unit   = excluded.grams_per_unit,
          density_g_per_ml = excluded.density_g_per_ml,
-         is_pantry_staple = excluded.is_pantry_staple`,
+         is_pantry_staple = excluded.is_pantry_staple,
+         dietary_tags     = excluded.dietary_tags`,
       [
         entry.slug,
         entry.display_name,
@@ -54,6 +57,7 @@ export async function seedCanonical(filePath = SEED_PATH): Promise<number> {
         JSON.stringify(entry.grams_per_unit ?? {}),
         entry.density_g_per_ml ?? null,
         entry.is_pantry_staple ?? false,
+        entry.dietary_tags ?? [],
       ],
     );
     written++;

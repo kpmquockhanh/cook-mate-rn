@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { discover, type DiscoverOptions } from '../crawl/discover.js';
+import { extractProseAll } from '../crawl/prose-run.js';
 import { crawl, enqueue } from '../crawl/run.js';
 import { setSourcePolicy } from '../crawl/sources.js';
 import { query } from '../db.js';
@@ -18,10 +19,12 @@ import {
   runningJob,
   startJob,
 } from '../jobs/runner.js';
+import { getRun, recentRuns, runLog, type RunKind } from '../jobs/runs.js';
 import { logger } from '../log.js';
-import { parseAll } from '../parse/run.js';
+import { countPendingImages, mirrorImages } from '../images/run.js';
+import { countPendingParse, parseAll } from '../parse/run.js';
 import { preflight } from '../publish/preflight.js';
-import { publishAll } from '../publish/run.js';
+import { countPendingPublish, publishAll } from '../publish/run.js';
 
 const log = logger('console');
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -173,7 +176,9 @@ type StageRunner = (
 
 const STAGES: Record<Exclude<JobKind, 'discover' | 'pipeline'>, StageRunner> = {
   crawl: (limit) => crawl(limit),
+  extract: (limit, flags) => extractProseAll(limit, { dryRun: flags.dryRun ?? false }),
   parse: (limit, flags) => parseAll(limit, flags.force ?? false),
+  images: (limit, flags) => mirrorImages(limit, { force: flags.force ?? false }),
   enrich: (limit, flags) => enrichAll(limit, { escalate: flags.escalate ?? false }),
   gate: (limit) => gateAll(limit),
   publish: (limit, flags) => publishAll(limit, flags.republish ?? false),
@@ -191,7 +196,8 @@ async function handleApi(
 
   // --- overview ------------------------------------------------------------
   if (route === 'GET /api/overview') {
-    const [staging, queue, sources, unmatched] = await Promise.all([
+    const [staging, queue, sources, unmatched, extractable, parsable, mirrorable, publishable] =
+      await Promise.all([
       query(
         `select status, count(*)::int as count, round(avg(quality_score))::int as avg_score
            from crawler.recipe_staging group by status`,
@@ -208,14 +214,35 @@ async function handleApi(
       query(
         `select count(*)::int as count from crawler.unmatched_ingredients where resolved_to is null`,
       ),
+      // Pages nothing could read yet, and the current prompt version has not
+      // looked at: the backlog the Extract stage would work through.
+      query(
+        `select count(*)::int as count from crawler.raw_pages
+          where extractor = 'none'
+            and (extraction_version is null or extraction_version < $1)`,
+        [env.extractionVersion],
+      ),
+      // The same set the Parse stage would work through - not `crawl_queue`
+      // rows in 'done', which is a permanent record that a URL was fetched and
+      // so never drains.
+      countPendingParse(),
+      countPendingImages(),
+      countPendingPublish(),
     ]);
     return {
       staging,
       queue,
       sources: sources[0] ?? { total: 0, image_ok: 0, disabled: 0 },
       unmatched: unmatched[0]?.count ?? 0,
+      extractable: extractable[0]?.count ?? 0,
+      parsable,
+      mirrorable,
+      publishable,
       running: Object.fromEntries(
-        (['discover', 'crawl', 'parse', 'enrich', 'gate', 'publish', 'pipeline'] as JobKind[]).map(
+        ([
+          'discover', 'crawl', 'extract', 'parse', 'images', 'enrich', 'gate', 'publish',
+          'pipeline',
+        ] as JobKind[]).map(
           (kind) => [kind, runningJob(kind)?.id ?? null],
         ),
       ),
@@ -308,6 +335,7 @@ async function handleApi(
       verify: body.verify ?? false,
       dryRun: body.dryRun ?? false,
       includeSubdomains: body.includeSubdomains ?? false,
+      refetch: body.refetch ?? false,
       include: body.include,
       exclude: body.exclude,
     };
@@ -334,6 +362,7 @@ async function handleApi(
         for (const [name, run] of [
           ['crawl', STAGES.crawl],
           ['parse', STAGES.parse],
+          ['images', STAGES.images],
           ['enrich', STAGES.enrich],
           ['gate', STAGES.gate],
         ] as const) {
@@ -365,7 +394,7 @@ async function handleApi(
 
   const jobMatch = /^\/api\/jobs\/([0-9a-f-]+)$/i.exec(url.pathname);
   if (jobMatch && req.method === 'GET') {
-    const job = getJob(jobMatch[1]!, intParam(url, 'since', 0));
+    const job = await getJob(jobMatch[1]!, intParam(url, 'since', 0));
     if (!job) throw bad('no such job', 404);
     return job;
   }
@@ -379,7 +408,7 @@ async function handleApi(
   if (route === 'GET /api/sources') {
     return query(
       `select s.id, s.domain, s.name, s.license, s.allow_image_use, s.crawl_delay_ms,
-              s.enabled,
+              s.recrawl_interval_hours, s.enabled,
               count(r.id)::int as pages,
               count(r.id) filter (where r.extractor = 'none')::int as extract_failures
          from crawler.sources s
@@ -396,6 +425,7 @@ async function handleApi(
       license?: string;
       allowImageUse?: boolean;
       crawlDelayMs?: number;
+      recrawlIntervalHours?: number | null;
       enabled?: boolean;
     }>(req);
     if (!body.domain) throw bad('sources needs a domain');
@@ -432,6 +462,30 @@ async function handleApi(
       [ids, decision],
     );
     return { updated: rows.length };
+  }
+
+  // --- runs ---------------------------------------------------------------
+  if (route === 'GET /api/runs') {
+    const kind = url.searchParams.get('kind') ?? undefined;
+    if (kind && !['crawl', 'discover', 'extract'].includes(kind)) {
+      throw bad(`unknown run kind "${kind}"`);
+    }
+    return recentRuns(kind as RunKind | undefined, intParam(url, 'limit', 20));
+  }
+
+  // The stored log of one run, which outlives the job that produced it: this
+  // is how a crawl that ran overnight is read the next morning.
+  const runLogMatch = /^\/api\/runs\/(\d+)\/log$/.exec(url.pathname);
+  if (runLogMatch && req.method === 'GET') {
+    const id = Number(runLogMatch[1]);
+    const run = await getRun(id);
+    if (!run) throw bad(`no run #${id}`, 404);
+    // The run comes back with its lines so a reader tailing a live run learns
+    // it has finished from the same request that stops returning new lines.
+    return {
+      run,
+      lines: await runLog(id, intParam(url, 'since', 0), Math.min(intParam(url, 'limit', 1000), 5000)),
+    };
   }
 
   if (route === 'GET /api/unmatched') {

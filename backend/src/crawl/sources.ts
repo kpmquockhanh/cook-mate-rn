@@ -11,6 +11,7 @@ interface SourceRow {
   license: string | null;
   allow_image_use: boolean;
   crawl_delay_ms: number;
+  recrawl_interval_hours: number | null;
   enabled: boolean;
 }
 
@@ -19,6 +20,8 @@ export interface SourcePolicy {
   license?: string;
   allowImageUse?: boolean;
   crawlDelayMs?: number;
+  /** Null disables revisiting this source. */
+  recrawlIntervalHours?: number | null;
   enabled?: boolean;
 }
 
@@ -45,6 +48,9 @@ export async function setSourcePolicy(target: string, policy: SourcePolicy): Pro
   if (policy.license !== undefined) set('license', policy.license);
   if (policy.allowImageUse !== undefined) set('allow_image_use', policy.allowImageUse);
   if (policy.crawlDelayMs !== undefined) set('crawl_delay_ms', policy.crawlDelayMs);
+  if (policy.recrawlIntervalHours !== undefined) {
+    set('recrawl_interval_hours', policy.recrawlIntervalHours);
+  }
   if (policy.enabled !== undefined) set('enabled', policy.enabled);
 
   if (sets.length === 0) throw new Error('sources set needs at least one policy flag');
@@ -52,7 +58,8 @@ export async function setSourcePolicy(target: string, policy: SourcePolicy): Pro
   const rows = await query<SourceRow>(
     `update crawler.sources set ${sets.join(', ')}
       where domain = $1
-      returning id, domain, name, license, allow_image_use, crawl_delay_ms, enabled`,
+      returning id, domain, name, license, allow_image_use, crawl_delay_ms,
+                recrawl_interval_hours, enabled`,
     values,
   );
 
@@ -64,16 +71,25 @@ export async function setSourcePolicy(target: string, policy: SourcePolicy): Pro
 
   const row = rows[0]!;
   log.info(
-    `${row.domain}: images=${row.allow_image_use} license=${row.license ?? '-'} enabled=${row.enabled}`,
+    `${row.domain}: images=${row.allow_image_use} license=${row.license ?? '-'} ` +
+      `enabled=${row.enabled} revisit=${describeInterval(row.recrawl_interval_hours)}`,
   );
   if (policy.allowImageUse) {
     log.info('re-run `npm run publish -- --republish` to backfill images onto already-published recipes');
   }
 }
 
+/** Hours are how it is stored; days are how an operator thinks about it. */
+function describeInterval(hours: number | null): string {
+  if (hours === null) return 'never';
+  if (hours % 24 === 0) return `${hours / 24}d`;
+  return `${hours}h`;
+}
+
 export async function listSources(): Promise<void> {
   const rows = await query<SourceRow>(
-    `select id, domain, name, license, allow_image_use, crawl_delay_ms, enabled
+    `select id, domain, name, license, allow_image_use, crawl_delay_ms,
+            recrawl_interval_hours, enabled
        from crawler.sources order by domain`,
   );
 
@@ -90,6 +106,7 @@ export async function listSources(): Promise<void> {
         `images=${String(row.allow_image_use).padEnd(5)}`,
         `enabled=${String(row.enabled).padEnd(5)}`,
         `delay=${row.crawl_delay_ms}ms`,
+        `revisit=${describeInterval(row.recrawl_interval_hours).padEnd(7)}`,
         `license=${row.license ?? '-'}`,
       ].join('  '),
     );

@@ -49,10 +49,17 @@ export interface EnrichedStep {
   isPassive: boolean;
 }
 
+/** When a dish is eaten. 'basics' is a component - a sauce, a stock, a frosting. */
+export type Meal = 'breakfast' | 'lunch' | 'dinner' | 'dessert' | 'snack' | 'basics';
+
 export interface EnrichmentResult {
   steps: EnrichedStep[];
   notes: string[];
   difficulty: 'easy' | 'medium' | 'hard';
+  /** Absent on rows enriched before enrichment version 2. */
+  meal?: Meal;
+  /** The model's reading, used when the scrape left `cuisine` null. */
+  cuisine?: string | null;
   servings: number | null;
   totalTimeSeconds: number | null;
   /** The model's own 0-10 quality judgment, distinct from the scraped source rating. */
@@ -69,6 +76,8 @@ export interface StagingRow {
   description: string | null;
   image_url: string | null;
   image_urls: string[];
+  /** Object paths in our own bucket, once the mirror stage has run. */
+  image_paths: string[];
   servings: number | null;
   total_time_seconds: number | null;
   prep_time_seconds: number | null;

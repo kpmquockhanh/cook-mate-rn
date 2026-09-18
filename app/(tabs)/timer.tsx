@@ -1,278 +1,374 @@
-import React, { useState } from 'react';
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  TextInput,
-  ScrollView,
-  StyleSheet,
-} from 'react-native';
+import React, { useMemo, useState } from 'react';
+import { View, Text, TouchableOpacity, TextInput, ScrollView } from 'react-native';
 import { Container } from 'components/Container';
 import { StatusBar } from 'expo-status-bar';
+import { LinearGradient } from 'expo-linear-gradient';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
-import { useTimer, ActiveTimer } from '../../lib/TimerContext';
+import TimerCard, { TONE_STYLE } from 'components/Timer/TimerCard';
+import { useTimer, formatDuration, timerTone, type ActiveTimer } from '../../lib/TimerContext';
+import { useTranslation, type TranslationKey, type Translator } from '../../lib/i18n';
 
 interface QuickStartTimer {
   id: string;
-  name: string;
+  /** Looked up at render time, so the preset follows the language. */
+  nameKey: TranslationKey;
   minutes: number;
   emoji: string;
-  color: string;
 }
 
 const quickStartTimers: QuickStartTimer[] = [
-  { id: '1', name: 'Quick', minutes: 3, emoji: '⚡', color: '#E8F5E8' },
-  { id: '2', name: 'Pasta', minutes: 8, emoji: '🍝', color: '#FFF3E0' },
-  { id: '3', name: 'Eggs', minutes: 10, emoji: '🥚', color: '#FCE4EC' },
-  { id: '4', name: 'Veggies', minutes: 15, emoji: '🥬', color: '#E8F5E8' },
-  { id: '5', name: 'Chicken', minutes: 20, emoji: '🍗', color: '#FCE4EC' },
-  { id: '6', name: 'Bread', minutes: 30, emoji: '🍞', color: '#FFF3E0' },
+  { id: '1', nameKey: 'timer.presetQuick', minutes: 3, emoji: '⚡' },
+  { id: '2', nameKey: 'timer.presetPasta', minutes: 8, emoji: '🍝' },
+  { id: '3', nameKey: 'timer.presetEggs', minutes: 10, emoji: '🥚' },
+  { id: '4', nameKey: 'timer.presetVeggies', minutes: 15, emoji: '🥬' },
+  { id: '5', nameKey: 'timer.presetChicken', minutes: 20, emoji: '🍗' },
+  { id: '6', nameKey: 'timer.presetBread', minutes: 30, emoji: '🍞' },
 ];
 
-export default function Timer() {
-  const { activeTimers, setActiveTimers, runningTimersCount } = useTimer();
-  
-  const [customTimerName, setCustomTimerName] = useState('');
-  const [customMinutes, setCustomMinutes] = useState(5);
+/** Chips for building a custom duration, in seconds. */
+const TIME_CHIPS = [30, 60, 300, 600];
 
-  const startQuickTimer = (quickTimer: QuickStartTimer) => {
-    const newTimer: ActiveTimer = {
-      id: Date.now().toString(),
-      name: quickTimer.name,
-      totalSeconds: quickTimer.minutes * 60,
-      remainingSeconds: quickTimer.minutes * 60,
-      status: 'running',
-      priority: 'active',
-      emoji: quickTimer.emoji,
-    };
-    setActiveTimers(prev => [...prev, newTimer]);
+const PRIMARY = '#ff6b6b';
+const SECONDARY = '#ff8e53';
+
+const MAX_CUSTOM_SECONDS = 12 * 60 * 60;
+
+const CARD_SHADOW = {
+  shadowColor: '#000',
+  shadowOffset: { width: 0, height: 2 },
+  shadowOpacity: 0.07,
+  shadowRadius: 10,
+  elevation: 2,
+} as const;
+
+const TABULAR = { fontVariant: ['tabular-nums' as const] };
+
+/**
+ * The duration in words, under the digits - "1 hour 5 min" reads back what the
+ * user just built, where "1:05:00" on its own can be misread as an hour or as
+ * a minute.
+ */
+function describeDuration(totalSeconds: number, t: Translator): string {
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  return [
+    hours > 0 ? t('duration.hours', { count: hours }) : null,
+    minutes > 0 ? t('duration.minutes', { count: minutes }) : null,
+    seconds > 0 ? t('duration.seconds', { count: seconds }) : null,
+  ]
+    .filter(Boolean)
+    .join(' ');
+}
+
+/**
+ * Done first, because a finished timer is the only one asking the user for
+ * something. Then whatever runs out soonest - the order a cook has to act in.
+ * Paused timers sink to the bottom: they are not counting, so their remaining
+ * time says nothing about when they need attention.
+ */
+function byUrgency(a: ActiveTimer, b: ActiveTimer): number {
+  const rank = (timer: ActiveTimer) => {
+    const tone = timerTone(timer);
+    if (tone === 'done') return 0;
+    if (tone === 'paused') return 2;
+    return 1;
   };
+
+  const difference = rank(a) - rank(b);
+  return difference !== 0 ? difference : a.remainingSeconds - b.remainingSeconds;
+}
+
+function SectionHeading({
+  title,
+  icon,
+  right,
+}: {
+  title: string;
+  icon?: React.ComponentProps<typeof MaterialIcons>['name'];
+  right?: React.ReactNode;
+}) {
+  return (
+    <View className="mb-3 flex-row items-center justify-between">
+      <View className="flex-row items-center gap-2">
+        <Text className="text-xl font-bold text-gray-800">{title}</Text>
+        {icon ? <MaterialIcons name={icon} size={18} color={PRIMARY} /> : null}
+      </View>
+      {right}
+    </View>
+  );
+}
+
+export default function Timer() {
+  const { t } = useTranslation();
+  const {
+    activeTimers,
+    isLoaded,
+    runningTimersCount,
+    startTimer,
+    toggleTimer,
+    addTime,
+    restartTimer,
+    dismissTimer,
+    dismissFinished,
+  } = useTimer();
+
+  const [customTimerName, setCustomTimerName] = useState('');
+  const [customSeconds, setCustomSeconds] = useState(5 * 60);
+
+  const sorted = useMemo(() => [...activeTimers].sort(byUrgency), [activeTimers]);
+  const finishedCount = activeTimers.filter((timer) => timer.remainingSeconds <= 0).length;
+
+  // The headline: whatever needs attention first. A finished timer outranks a
+  // running one, which is the same rule the list is sorted by.
+  const headline = sorted[0];
+  const headlineTone = headline ? timerTone(headline) : null;
 
   const startCustomTimer = () => {
-    console.log('startCustomTimer', {
-      customTimerName, customMinutes
+    if (customSeconds <= 0) return;
+    startTimer({
+      name: customTimerName.trim() || formatDuration(customSeconds),
+      seconds: customSeconds,
+      emoji: '⏰',
     });
-    if (customMinutes > 0) {
-      const newTimer: ActiveTimer = {
-        id: Date.now().toString(),
-        name: customTimerName.trim(),
-        totalSeconds: customMinutes * 60,
-        remainingSeconds: customMinutes * 60,
-        status: 'running',
-        priority: 'active',
-        emoji: '⏰',
-      };
-      setActiveTimers(prev => [...prev, newTimer]);
-      setCustomTimerName('');
-      setCustomMinutes(5);
-    }
+    setCustomTimerName('');
+    setCustomSeconds(5 * 60);
   };
 
-  const toggleTimer = (id: string) => {
-    setActiveTimers(prev => prev.map(timer => 
-      timer.id === id 
-        ? { ...timer, status: timer.status === 'running' ? 'paused' : 'running' }
-        : timer
-    ));
-  };
-
-  const stopTimer = (id: string) => {
-    setActiveTimers(prev => prev.filter(timer => timer.id !== id));
-  };
-
-  const addTimeToTimer = (id: string, seconds: number) => {
-    setActiveTimers(prev => prev.map(timer => 
-      timer.id === id 
-        ? { 
-            ...timer, 
-            remainingSeconds: Math.max(0, timer.remainingSeconds + seconds),
-            totalSeconds: timer.totalSeconds + Math.max(0, seconds)
-          }
-        : timer
-    ));
-  };
-
-  const formatTime = (seconds: number) => {
-    const minutes = Math.floor(seconds / 60);
-    const remainingSeconds = seconds % 60;
-    return `${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`;
-  };
-
-  const getTimerProgress = (timer: ActiveTimer) => {
-    return (timer.totalSeconds - timer.remainingSeconds) / timer.totalSeconds;
-  };
-
-  const getPriorityColor = (priority: string) => {
-    switch (priority) {
-      case 'critical': return '#E53E3E';
-      case 'warning': return '#F6AD55';
-      case 'active': return '#48BB78';
-      default: return '#A0AEC0';
-    }
-  };
-
-  const getPriorityLabel = (priority: string) => {
-    switch (priority) {
-      case 'critical': return 'CRITICAL';
-      case 'warning': return 'WARNING';
-      case 'active': return 'ACTIVE';
-      default: return 'PAUSED';
-    }
-  };
-
-
+  const adjustCustom = (seconds: number) =>
+    setCustomSeconds((current) => Math.min(MAX_CUSTOM_SECONDS, Math.max(0, current + seconds)));
 
   return (
     <>
       <Container>
-        <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 100 }}>
-          {/* Quick Start Section */}
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Quick Start</Text>
-              <MaterialIcons name="bolt" size={20} color="#FF6B6B" />
+        <ScrollView className="flex-1" contentContainerStyle={{ paddingBottom: 90 }}>
+          {/* Header. Mirrors the home tab's gradient block so the two read as
+              one app, and carries the one number the user opened the tab for. */}
+          <LinearGradient
+            colors={[PRIMARY, SECONDARY]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+            style={{
+              paddingHorizontal: 24,
+              paddingVertical: 24,
+              borderBottomLeftRadius: 24,
+              borderBottomRightRadius: 24,
+            }}>
+            <View className="flex-row items-center justify-between">
+              <View className="flex-1 pr-3">
+                <Text className="text-xl font-bold text-white">{t('timer.title')}</Text>
+                <Text className="mt-1 text-sm text-white/90">
+                  {runningTimersCount > 0
+                    ? finishedCount > 0
+                      ? t('timer.runningAndDone', {
+                          running: runningTimersCount,
+                          done: finishedCount,
+                        })
+                      : t('timer.running', { count: runningTimersCount })
+                    : finishedCount > 0
+                      ? t('timer.finishedCount', { count: finishedCount })
+                      : t('timer.idle')}
+                </Text>
+              </View>
+
+              <View className="h-12 w-12 items-center justify-center rounded-full bg-white/20">
+                <MaterialIcons name="timer" size={24} color="white" />
+              </View>
             </View>
-            
-            <View style={styles.quickStartGrid}>
-              {quickStartTimers.map(timer => (
-                <TouchableOpacity
+
+            {headline ? (
+              <View className="mt-5 flex-row items-center rounded-2xl bg-white/15 px-4 py-3">
+                <Text className="text-2xl">{headline.emoji}</Text>
+                <View className="ml-3 flex-1">
+                  <Text className="text-xs font-semibold uppercase tracking-wide text-white/70">
+                    {headlineTone === 'done'
+                      ? t('timer.headlineFinished')
+                      : t('timer.headlineNext')}
+                  </Text>
+                  <Text className="text-base font-bold text-white" numberOfLines={1}>
+                    {headline.name || t('timer.unnamed')}
+                  </Text>
+                </View>
+                <Text className="text-2xl font-bold text-white" style={TABULAR}>
+                  {formatDuration(headline.remainingSeconds)}
+                </Text>
+              </View>
+            ) : null}
+          </LinearGradient>
+
+          {/* Active timers come before the presets: once something is cooking,
+              the countdown is the reason the tab was opened, and it used to sit
+              below two screens of buttons. */}
+          <View className="mt-6 px-4">
+            <SectionHeading
+              title={t('timer.active')}
+              right={
+                finishedCount > 0 ? (
+                  <TouchableOpacity
+                    onPress={dismissFinished}
+                    activeOpacity={0.7}
+                    accessibilityRole="button">
+                    <Text
+                      className="text-sm font-semibold"
+                      style={{ color: TONE_STYLE.done.color }}>
+                      {t('timer.clearFinished')}
+                    </Text>
+                  </TouchableOpacity>
+                ) : null
+              }
+            />
+
+            {sorted.length > 0 ? (
+              sorted.map((timer) => (
+                <TimerCard
                   key={timer.id}
-                  style={[styles.quickStartCard, { backgroundColor: timer.color }]}
-                  onPress={() => startQuickTimer(timer)}
-                >
-                  <Text style={styles.quickStartEmoji}>{timer.emoji}</Text>
-                  <Text style={styles.quickStartName}>{timer.name}</Text>
-                  <Text style={styles.quickStartTime}>{timer.minutes} min</Text>
-                </TouchableOpacity>
-              ))}
+                  timer={timer}
+                  onToggle={() => toggleTimer(timer.id)}
+                  onAddTime={(seconds) => addTime(timer.id, seconds)}
+                  onRestart={() => restartTimer(timer.id)}
+                  onDismiss={() => dismissTimer(timer.id)}
+                />
+              ))
+            ) : (
+              // Previously this was a bare heading over empty space, which is
+              // what made the screen look broken rather than idle.
+              <View className="items-center rounded-2xl bg-white px-6 py-10" style={CARD_SHADOW}>
+                <View className="h-16 w-16 items-center justify-center rounded-full bg-gray-50">
+                  <MaterialIcons name="hourglass-empty" size={28} color="#CBD5E1" />
+                </View>
+                <Text className="mt-4 text-base font-semibold text-gray-700">
+                  {isLoaded ? t('timer.noneRunning') : t('timer.checking')}
+                </Text>
+                <Text className="mt-1 text-center text-sm leading-5 text-gray-400">
+                  {t('timer.emptyHint')}
+                </Text>
+              </View>
+            )}
+          </View>
+
+          {/* Quick Start */}
+          <View className="mt-7 px-4">
+            <SectionHeading title={t('timer.quickStart')} icon="bolt" />
+
+            <View className="flex-row flex-wrap" style={{ gap: 10 }}>
+              {quickStartTimers.map((preset) => {
+                const name = t(preset.nameKey);
+                return (
+                  <TouchableOpacity
+                    key={preset.id}
+                    onPress={() =>
+                      startTimer({
+                        name,
+                        seconds: preset.minutes * 60,
+                        emoji: preset.emoji,
+                      })
+                    }
+                    activeOpacity={0.8}
+                    accessibilityRole="button"
+                    accessibilityLabel={t('timer.quickStartLabel', {
+                      count: preset.minutes,
+                      name,
+                    })}
+                    className="items-center rounded-2xl bg-white py-4"
+                    style={[CARD_SHADOW, { width: '31%' }]}>
+                    <Text className="text-2xl">{preset.emoji}</Text>
+                    <Text className="mt-2 text-sm font-semibold text-gray-800">{name}</Text>
+                    <Text className="mt-0.5 text-xs text-gray-400">
+                      {t('duration.minutes', { count: preset.minutes })}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
             </View>
           </View>
 
-          {/* Custom Timer Section */}
-          <View style={[styles.section, {borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 12, padding: 16}]}>
-            <View style={styles.customTimerContainer}>
+          {/* Custom timer */}
+          <View className="mt-7 px-4">
+            <SectionHeading title={t('timer.custom')} icon="tune" />
+
+            <View className="rounded-2xl bg-white p-4" style={CARD_SHADOW}>
               <TextInput
-                style={styles.timerNameInput}
-                placeholder="Timer name (e.g., Pasta"
                 value={customTimerName}
                 onChangeText={setCustomTimerName}
+                placeholder={t('timer.customNamePlaceholder')}
+                placeholderTextColor="#9CA3AF"
+                maxLength={40}
+                returnKeyType="done"
+                onSubmitEditing={startCustomTimer}
+                className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-base text-gray-800"
               />
-            </View>
 
-            <View style={styles.timeInputContainer}>
-              <View style={{flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 16, width: '100%'}}>
-              <TouchableOpacity
-                style={styles.timeButton}
-                onPress={() => setCustomMinutes(Math.max(1, customMinutes - 1))}
-              >
-                <MaterialIcons name="remove" size={24} color="#666" />
-              </TouchableOpacity>
-              
-              <View style={styles.timeDisplay}>
-                <Text style={styles.timeText}>{formatTime(customMinutes * 60)}</Text>
-                <Text style={styles.timeLabel}>minutes</Text>
-              </View>
-              
-              <TouchableOpacity
-                style={styles.timeButton}
-                onPress={() => setCustomMinutes(customMinutes + 1)}
-              >
-                <MaterialIcons name="add" size={24} color="#666" />
-              </TouchableOpacity>
-              </View>
-              
-              <TouchableOpacity
-                style={styles.startButton}
-                onPress={startCustomTimer}
-              >
-                <MaterialIcons name="play-arrow" size={24} color="white" />
-              </TouchableOpacity>
-            </View>
-          </View>
+              <View className="mt-4 flex-row items-center justify-between">
+                <TouchableOpacity
+                  onPress={() => adjustCustom(-60)}
+                  disabled={customSeconds <= 0}
+                  activeOpacity={0.7}
+                  accessibilityRole="button"
+                  accessibilityLabel={t('timer.oneMinuteLess')}
+                  className="h-12 w-12 items-center justify-center rounded-full bg-gray-100"
+                  style={customSeconds <= 0 ? { opacity: 0.4 } : undefined}>
+                  <MaterialIcons name="remove" size={22} color="#374151" />
+                </TouchableOpacity>
 
-          {/* Active Timers Section */}
-          <View style={styles.section}>
-            <View style={styles.activeTimersHeader}>
-              <Text style={styles.sectionTitle}>Active Timers</Text>
-              <View style={styles.runningIndicator}>
-                <View style={styles.runningDot} />
-                <Text style={styles.runningText}>{runningTimersCount} Running</Text>
-              </View>
-            </View>
-
-            {activeTimers.map(timer => (
-              <View
-                key={timer.id}
-                style={[
-                  styles.activeTimerCard,
-                  { backgroundColor: getPriorityColor(timer.priority) }
-                ]}
-              >
-                <View style={styles.timerHeader}>
-                  <View style={styles.timerTitleContainer}>
-                    <Text style={styles.timerEmoji}>{timer.emoji}</Text>
-                    <Text style={styles.timerName}>{timer.name}</Text>
-                  </View>
-                  <Text style={styles.priorityLabel}>
-                    {getPriorityLabel(timer.priority)}
+                <View className="items-center">
+                  <Text className="text-4xl font-bold text-gray-800" style={TABULAR}>
+                    {formatDuration(customSeconds)}
+                  </Text>
+                  <Text className="mt-1 text-xs text-gray-400">
+                    {customSeconds > 0
+                      ? describeDuration(customSeconds, t)
+                      : t('timer.setDuration')}
                   </Text>
                 </View>
 
-                <Text style={styles.timerTime}>{formatTime(timer.remainingSeconds)}</Text>
-
-                <View style={styles.progressContainer}>
-                  <View style={styles.progressBar}>
-                    <View
-                      style={[
-                        styles.progressFill,
-                        { width: `${getTimerProgress(timer) * 100}%` }
-                      ]}
-                    />
-                  </View>
-                </View>
-
-                <View style={styles.timerControls}>
-                  <TouchableOpacity
-                    style={styles.controlButton}
-                    onPress={() => toggleTimer(timer.id)}
-                  >
-                    <MaterialIcons
-                      name={timer.status === 'running' ? 'pause' : 'play-arrow'}
-                      size={20}
-                      color="white"
-                    />
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={styles.controlButton}
-                    onPress={() => stopTimer(timer.id)}
-                  >
-                    <MaterialIcons name="stop" size={20} color="white" />
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={styles.controlButton}
-                    onPress={() => addTimeToTimer(timer.id, -60)}
-                  >
-                    <MaterialIcons name="remove" size={20} color="white" />
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={styles.controlButton}
-                    onPress={() => addTimeToTimer(timer.id, 60)}
-                  >
-                    <MaterialIcons name="add" size={20} color="white" />
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={styles.controlButton}
-                    onPress={() => stopTimer(timer.id)}
-                  >
-                    <MaterialIcons name="delete" size={20} color="white" />
-                  </TouchableOpacity>
-                </View>
+                <TouchableOpacity
+                  onPress={() => adjustCustom(60)}
+                  activeOpacity={0.7}
+                  accessibilityRole="button"
+                  accessibilityLabel={t('timer.oneMinuteMore')}
+                  className="h-12 w-12 items-center justify-center rounded-full bg-gray-100">
+                  <MaterialIcons name="add" size={22} color="#374151" />
+                </TouchableOpacity>
               </View>
-            ))}
+
+              {/* The minute stepper alone made a 45-minute roast a 45-tap job. */}
+              <View className="mt-4 flex-row justify-center" style={{ gap: 8 }}>
+                {TIME_CHIPS.map((seconds) => (
+                  <TouchableOpacity
+                    key={seconds}
+                    onPress={() => adjustCustom(seconds)}
+                    activeOpacity={0.7}
+                    accessibilityRole="button"
+                    className="rounded-full bg-gray-100 px-3 py-2">
+                    <Text className="text-xs font-semibold text-gray-700">
+                      +{formatDuration(seconds)}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+                <TouchableOpacity
+                  onPress={() => setCustomSeconds(0)}
+                  activeOpacity={0.7}
+                  accessibilityRole="button"
+                  className="rounded-full bg-gray-100 px-3 py-2">
+                  <Text className="text-xs font-semibold text-gray-500">{t('common.clear')}</Text>
+                </TouchableOpacity>
+              </View>
+
+              <TouchableOpacity
+                onPress={startCustomTimer}
+                disabled={customSeconds <= 0}
+                activeOpacity={0.85}
+                accessibilityRole="button"
+                className="mt-4 h-12 flex-row items-center justify-center rounded-xl"
+                style={{
+                  backgroundColor: PRIMARY,
+                  opacity: customSeconds <= 0 ? 0.45 : 1,
+                }}>
+                <MaterialIcons name="play-arrow" size={22} color="white" />
+                <Text className="ml-1 text-base font-semibold text-white">{t('timer.start')}</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </ScrollView>
       </Container>
@@ -280,207 +376,3 @@ export default function Timer() {
     </>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    paddingHorizontal: 20,
-    paddingTop: 50,
-  },
-  section: {
-    marginBottom: 30,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 16,
-  },
-  sectionTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#333',
-  },
-  quickStartGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 12,
-  },
-  quickStartCard: {
-    width: '47%',
-    padding: 16,
-    borderRadius: 12,
-    alignItems: 'center',
-  },
-  quickStartEmoji: {
-    fontSize: 24,
-    marginBottom: 8,
-  },
-  quickStartName: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 4,
-  },
-  quickStartTime: {
-    fontSize: 12,
-    color: '#666',
-  },
-  customTimerContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 20,
-    gap: 12,
-  },
-  timerNameInput: {
-    flex: 1,
-    backgroundColor: '#f8f8f8',
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    fontSize: 16,
-    color: '#333',
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-  },
-  micButton: {
-    backgroundColor: '#5A67D8',
-    width: 48,
-    height: 48,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  timeInputContainer: {
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 16,
-  },
-  timeButton: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#f8f8f8',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  timeDisplay: {
-    alignItems: 'center',
-    paddingHorizontal: 20,
-  },
-  timeText: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    color: '#333',
-  },
-  timeLabel: {
-    fontSize: 14,
-    color: '#666',
-    marginTop: 4,
-  },
-  startButton: {
-    backgroundColor: '#FF6B6B',
-    width: '100%',
-    height: 48,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  activeTimersHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 16,
-  },
-  runningIndicator: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  runningDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#48BB78',
-  },
-  runningText: {
-    fontSize: 14,
-    color: '#666',
-  },
-  activeTimerCard: {
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 16,
-  },
-  timerHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 12,
-  },
-  timerTitleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  timerEmoji: {
-    fontSize: 20,
-  },
-  timerName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: 'white',
-  },
-  priorityLabel: {
-    fontSize: 12,
-    fontWeight: 'bold',
-    color: 'white',
-    opacity: 0.9,
-  },
-  timerTime: {
-    fontSize: 36,
-    fontWeight: 'bold',
-    color: 'white',
-    marginBottom: 16,
-  },
-  progressContainer: {
-    marginBottom: 20,
-  },
-  progressBar: {
-    height: 4,
-    backgroundColor: 'rgba(255, 255, 255, 0.3)',
-    borderRadius: 2,
-    overflow: 'hidden',
-  },
-  progressFill: {
-    height: '100%',
-    backgroundColor: 'white',
-  },
-  timerControls: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  controlButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 8,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  addTimerButton: {
-    alignItems: 'center',
-    paddingVertical: 24,
-  },
-  addTimerText: {
-    fontSize: 16,
-    color: '#666',
-    marginTop: 8,
-  },
-  addTimerSubtext: {
-    fontSize: 14,
-    color: '#999',
-    marginTop: 4,
-  },
-});

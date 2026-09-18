@@ -5,6 +5,7 @@ import { logger } from '../log.js';
 import { formatCookingTime } from '../parse/duration.js';
 import { formatAmount } from '../parse/ingredient.js';
 import type { StagingRow } from '../types.js';
+import { deriveFacets, type CanonicalFact } from './facets.js';
 import { MAPPING } from './mapping.js';
 import { preflight, printPreflight } from './preflight.js';
 
@@ -26,6 +27,34 @@ interface SourceRow {
  * source's `allow_image_use`, say, since the images live in staging either way
  * and only the publish step decides whether they reach the app.
  */
+/**
+ * What the Publish stage would actually do, as two numbers.
+ *
+ * `approved` is the obvious backlog: rows waiting to go live for the first
+ * time. `stale` is the one the console used to hide - rows that are already
+ * live but whose staging row has moved on since, because they were re-enriched
+ * or their photos were mirrored. Publishing derives facets and copies image
+ * paths, so "already published" stopped meaning "up to date" the moment those
+ * arrived, and a console reading 0 was telling operators there was nothing to
+ * do while the app served stale rows.
+ *
+ * Clearing `stale` needs the republish flag; a plain run only takes `approved`.
+ */
+export async function countPendingPublish(): Promise<{ approved: number; stale: number }> {
+  const rows = await query<{ approved: number; stale: number }>(
+    `select
+       count(*) filter (where status = 'approved')::int as approved,
+       count(*) filter (
+         where status = 'published'
+           and published_at is not null
+           and (enriched_at > published_at or images_mirrored_at > published_at)
+       )::int as stale
+     from crawler.recipe_staging
+     where enriched is not null`,
+  );
+  return rows[0] ?? { approved: 0, stale: 0 };
+}
+
 export async function publishAll(limit: number, republish = false): Promise<number> {
   const report = await preflight();
   if (!report.ok) {
@@ -63,6 +92,33 @@ export async function publishAll(limit: number, republish = false): Promise<numb
   return published;
 }
 
+/**
+ * What the app stores as a recipe's photo.
+ *
+ * A mirrored object path wins: the images stage has already copied the photo
+ * into our own public bucket (see images/run.ts), and the app resolves a
+ * relative path against EXPO_PUBLIC_STORAGE_URL. Falling back to the source's
+ * own URL keeps rows published before the mirror existed working - utils/index.ts
+ * passes an absolute URL through untouched.
+ *
+ * Either way `allow_image_use` governs: a source that does not permit it
+ * publishes no photo at all, which is why 26 of the first 45 recipes have none.
+ */
+function heroImage(row: StagingRow, source: SourceRow | undefined): string | null {
+  if (!source?.allow_image_use) return null;
+  return row.image_paths[0] ?? row.image_url ?? null;
+}
+
+/**
+ * The gallery, deduped here as well as at extraction time so rows parsed
+ * before the extractors learned about CDN resize variants still publish
+ * distinct photos instead of the same one four times.
+ */
+function galleryImages(row: StagingRow, source: SourceRow | undefined): string[] {
+  if (!source?.allow_image_use) return [];
+  return row.image_paths.length > 0 ? row.image_paths : normalizeImages(row.image_urls);
+}
+
 async function publishOne(client: PoolClient, row: StagingRow): Promise<number> {
   const source = await client.query<SourceRow>(
     `select name, license, allow_image_use from crawler.sources where id = $1`,
@@ -71,6 +127,21 @@ async function publishOne(client: PoolClient, row: StagingRow): Promise<number> 
   const sourceRow = source.rows[0];
   const enriched = row.enriched!;
 
+  // One lookup for the whole recipe. Only ingredients that resolved to the
+  // dictionary come back, and facets.ts compares that count against the
+  // recipe's own ingredient count before it claims any diet.
+  const canonicalIds = row.ingredients
+    .map((ingredient) => ingredient.canonicalId)
+    .filter((id): id is number => typeof id === 'number');
+  const facts = canonicalIds.length === 0
+    ? []
+    : (await client.query<{ slug: string; dietary_tags: string[] }>(
+        `select slug, dietary_tags from crawler.ingredients_canonical where id = any($1)`,
+        [canonicalIds],
+      )).rows.map((fact): CanonicalFact => ({ slug: fact.slug, dietaryTags: fact.dietary_tags }));
+
+  const facets = deriveFacets(row, enriched, facts);
+
   const R = MAPPING.recipes.columns;
   const recipeResult = await client.query<{ id: number }>(
     `insert into ${MAPPING.recipes.table}
@@ -78,8 +149,10 @@ async function publishOne(client: PoolClient, row: StagingRow): Promise<number> 
         ${R.difficulty}, ${R.rating}, ${R.aiScore}, ${R.reviewCount}, ${R.category}, ${R.cuisine},
         ${R.sourceUrl}, ${R.sourceName}, ${R.sourceLicense}, ${R.urlHash},
         ${R.contentFingerprint}, ${R.qualityScore}, ${R.enrichmentVersion},
+        ${R.totalTimeSeconds}, ${R.activeTimeSeconds}, ${R.meal}, ${R.mainIngredient}, ${R.diet},
         ${R.crawledAt}, ${R.publishedAt})
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,now(),now())
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,
+             $19,$20,$21,$22,$23,now(),now())
      on conflict (${R.urlHash}) do update set
        ${R.title}              = excluded.${R.title},
        ${R.description}        = excluded.${R.description},
@@ -95,13 +168,17 @@ async function publishOne(client: PoolClient, row: StagingRow): Promise<number> 
        ${R.qualityScore}       = excluded.${R.qualityScore},
        ${R.enrichmentVersion}  = excluded.${R.enrichmentVersion},
        ${R.contentFingerprint} = excluded.${R.contentFingerprint},
+       ${R.totalTimeSeconds}   = excluded.${R.totalTimeSeconds},
+       ${R.activeTimeSeconds}  = excluded.${R.activeTimeSeconds},
+       ${R.meal}               = excluded.${R.meal},
+       ${R.mainIngredient}     = excluded.${R.mainIngredient},
+       ${R.diet}               = excluded.${R.diet},
        ${R.publishedAt}        = now()
      returning ${R.id} as id`,
     [
       row.title,
       row.description,
-      // Only republish the source's photo when the licence actually allows it.
-      sourceRow?.allow_image_use ? row.image_url : null,
+      heroImage(row, sourceRow),
       formatCookingTime(enriched.totalTimeSeconds ?? row.total_time_seconds),
       enriched.servings ?? row.servings,
       enriched.difficulty,
@@ -109,7 +186,7 @@ async function publishOne(client: PoolClient, row: StagingRow): Promise<number> 
       enriched.aiScore,
       row.source_review_count ?? 0,
       row.category,
-      row.cuisine,
+      facets.cuisine,
       row.source_url,
       sourceRow?.name ?? null,
       sourceRow?.license ?? null,
@@ -117,6 +194,11 @@ async function publishOne(client: PoolClient, row: StagingRow): Promise<number> 
       row.content_fingerprint,
       row.quality_score,
       row.enrichment_version,
+      facets.totalTimeSeconds,
+      facets.activeTimeSeconds,
+      facets.meal,
+      facets.mainIngredient,
+      facets.diet,
     ],
   );
 
@@ -131,18 +213,13 @@ async function publishOne(client: PoolClient, row: StagingRow): Promise<number> 
     );
   }
 
-  if (sourceRow?.allow_image_use) {
-    const I = MAPPING.images.columns;
-    // Also deduped here, not just at extraction time, so rows parsed before
-    // the extractors learned about CDN resize variants still publish a gallery
-    // of distinct photos instead of the same one four times.
-    for (const [order, imagePath] of normalizeImages(row.image_urls).entries()) {
-      await client.query(
-        `insert into ${MAPPING.images.table} (${I.recipeId}, ${I.imagePath}, ${I.sortOrder})
-         values ($1,$2,$3)`,
-        [recipeId, imagePath, order],
-      );
-    }
+  const I = MAPPING.images.columns;
+  for (const [order, imagePath] of galleryImages(row, sourceRow).entries()) {
+    await client.query(
+      `insert into ${MAPPING.images.table} (${I.recipeId}, ${I.imagePath}, ${I.sortOrder})
+       values ($1,$2,$3)`,
+      [recipeId, imagePath, order],
+    );
   }
 
   // ingredient_text is the exact string the app renders AND the string the

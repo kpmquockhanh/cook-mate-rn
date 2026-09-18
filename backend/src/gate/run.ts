@@ -6,12 +6,19 @@ import { fingerprint, gradeRecipe } from './score.js';
 
 const log = logger('gate');
 
+/** A staging row plus which extractor tier produced the page behind it. */
+interface GateRow extends StagingRow {
+  extractor: string;
+}
+
 export async function gateAll(limit: number): Promise<Record<string, number>> {
-  const rows = await query<StagingRow>(
-    `select * from crawler.recipe_staging
-      where status in ('parsed','enriched','review','rejected')
-        and edited_by_human = false
-      order by id
+  const rows = await query<GateRow>(
+    `select s.*, r.extractor
+       from crawler.recipe_staging s
+       join crawler.raw_pages r on r.id = s.raw_page_id
+      where s.status in ('parsed','enriched','review','rejected')
+        and s.edited_by_human = false
+      order by s.id
       limit $1`,
     [limit],
   );
@@ -35,6 +42,21 @@ export async function gateAll(limit: number): Promise<Record<string, number>> {
 
     let status = result.status;
     const issues = [...result.issues];
+
+    // A recipe a model read off an unstructured page is not eligible for
+    // publication on the score alone. Tiers A-C copy what a site published
+    // about itself; tier D is a reading of prose, and a reading can be wrong in
+    // ways no score detects - a misread quantity looks exactly like a correct
+    // one. A person sees it first.
+    if (row.extractor === 'llm' && status === 'approved') {
+      status = 'review';
+      issues.push({
+        code: 'llm_extracted',
+        severity: 'minor',
+        message: 'Extracted from unstructured page by a model - needs a human read before publishing',
+      });
+    }
+
     if (duplicate.length > 0 && status !== 'rejected') {
       status = 'rejected';
       issues.push({

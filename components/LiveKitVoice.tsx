@@ -21,6 +21,12 @@ import {
   type VoiceSessionStatus,
 } from '../lib/voiceSession';
 import { errorMessage, logger } from '../lib/log';
+// Two translators, deliberately: `tStatic` is for strings produced inside
+// callbacks (an RPC reply, an error detail), where the language only has to be
+// current at the moment they run, and the hook's `t` is for what is rendered,
+// which has to re-render when the preference changes.
+import { t as tStatic, useTranslation } from '../lib/i18n';
+import type { TranslationKey } from '../lib/i18n';
 
 registerGlobals();
 
@@ -48,6 +54,12 @@ interface LiveKitVoiceProps {
   onNextStep?: StepCallback;
   onPreviousStep?: StepCallback;
   onRepeatStep?: StepCallback;
+  /**
+   * Connect as soon as the component has credentials, rather than waiting for
+   * the user to tap the mic. Only the first 'ready' triggers it, so toggling
+   * the session off during a recipe does not immediately reconnect it.
+   */
+  autoStart?: boolean;
   /**
    * Every state change, with the underlying reason when the state is a failure.
    * The cooking screen is what turns this into a line the user can read.
@@ -156,28 +168,30 @@ function RoomView({
     // The agent reads the returned string aloud, so a throw here becomes an
     // unexplained apology in the user's ear. Log it, answer with something
     // sayable.
-    const rpc = (name: string, run: () => string | void, fallback: string) => async () => {
+    const rpc = (name: string, run: () => string | void, fallback: TranslationKey) => async () => {
       try {
-        const result = run() || fallback;
+        const result = run() || tStatic(fallback);
         log.info(`RPC ${name} -> ${result}`);
         return result;
       } catch (e) {
         log.error(`RPC ${name} failed`, e);
-        return `Sorry, I could not do that: ${errorMessage(e, 'something went wrong')}`;
+        return tStatic('voice.rpcFailed', {
+          reason: errorMessage(e, tStatic('voice.rpcFailedReason')),
+        });
       }
     };
 
     room.registerRpcMethod(
       'navigate_next',
-      rpc('navigate_next', () => handlers.current.onNextStep?.(), 'Moved to the next step')
+      rpc('navigate_next', () => handlers.current.onNextStep?.(), 'voice.rpcNext')
     );
     room.registerRpcMethod(
       'navigate_back',
-      rpc('navigate_back', () => handlers.current.onPreviousStep?.(), 'Moved to the previous step')
+      rpc('navigate_back', () => handlers.current.onPreviousStep?.(), 'voice.rpcBack')
     );
     room.registerRpcMethod(
       'repeat_step',
-      rpc('repeat_step', () => handlers.current.onRepeatStep?.(), 'Repeated the current step')
+      rpc('repeat_step', () => handlers.current.onRepeatStep?.(), 'voice.rpcRepeat')
     );
 
     return () => {
@@ -197,8 +211,10 @@ const LiveKitVoice: React.FC<LiveKitVoiceProps> = ({
   onNextStep,
   onPreviousStep,
   onRepeatStep,
+  autoStart = false,
   onStatusChange,
 }) => {
+  const { t } = useTranslation();
   const [session, setSession] = useState<Session>(READY);
   const [agentSpeaking, setAgentSpeaking] = useState(false);
   const [connect, setConnect] = useState(false);
@@ -272,13 +288,23 @@ const LiveKitVoice: React.FC<LiveKitVoiceProps> = ({
     } catch (e) {
       // startAudioSession is where a denied microphone surfaces on iOS.
       log.error('Could not start the audio session', e);
-      fail('mic-denied', errorMessage(e, 'The microphone is unavailable'));
+      fail('mic-denied', errorMessage(e, tStatic('voice.detailMicUnavailable')));
       return;
     }
     setConnect(true);
   }, [session.status, startAudio, stopAudio, fail]);
 
-  const copy = describeVoiceStatus(session.status, session.detail);
+  // Auto-connect, once. `handleToggle` is the same path the mic button takes,
+  // so the microphone prompt, the failure states and the teardown all behave
+  // exactly as they do for a tap.
+  const autoStarted = useRef(false);
+  useEffect(() => {
+    if (!autoStart || autoStarted.current) return;
+    autoStarted.current = true;
+    void handleToggle();
+  }, [autoStart, handleToggle]);
+
+  const copy = describeVoiceStatus(session.status, session.detail, t);
   const control = voiceControlIcon(session.status, agentSpeaking);
 
   return (
@@ -314,14 +340,14 @@ const LiveKitVoice: React.FC<LiveKitVoiceProps> = ({
           onError={(err: Error) => {
             log.error('Room error', err);
             void stopAudio();
-            fail('error', errorMessage(err, 'Could not reach the voice service'));
+            fail('error', errorMessage(err, tStatic('voice.detailUnreachable')));
           }}
           onMediaDeviceFailure={(failure?: MediaDeviceFailure) => {
             // Without this the room stays happily connected while the agent
             // hears silence, which reads to the user as the AI ignoring them.
             log.error(`Microphone failure: ${failure ?? 'unknown'}`);
             void stopAudio();
-            fail('mic-denied', `Microphone unavailable (${failure ?? 'unknown'})`);
+            fail('mic-denied', tStatic('voice.detailMicFailure', { reason: failure ?? 'unknown' }));
           }}
           options={{
             adaptiveStream: { pixelDensity: 'screen' },

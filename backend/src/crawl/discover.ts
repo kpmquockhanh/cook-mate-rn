@@ -1,10 +1,18 @@
+import { gunzipSync } from 'node:zlib';
 import * as cheerio from 'cheerio';
+import { withRun } from '../jobs/runs.js';
 import { logger } from '../log.js';
-import { canonicalizeUrl, domainOf } from '../util.js';
+import { canonicalizeUrl, domainOf, otherHostSpelling } from '../util.js';
 import { extractRecipe } from './extract.js';
-import { fetchPage, fetchText } from './fetcher.js';
+import { fetchBytes, fetchPage } from './fetcher.js';
 import { isAllowed, robotsFor } from './robots.js';
-import { enqueue, ingestFetchedPage } from './run.js';
+import {
+  alreadyStored,
+  enqueue,
+  ingestFetchedPage,
+  storeFetchedPage,
+  storedPage,
+} from './run.js';
 
 const log = logger('discover');
 
@@ -94,6 +102,13 @@ export interface DiscoverOptions {
   dryRun?: boolean;
   /** Follow links to `blog.example.com` from `example.com`. */
   includeSubdomains?: boolean;
+  /**
+   * Fetch pages the engine has already stored, instead of skipping them.
+   * Discovery is an exploration pass, so repeating a fetch it has already paid
+   * for is waste by default; this is the escape hatch for when the point *is*
+   * to see a page again.
+   */
+  refetch?: boolean;
   /** Extra caller-supplied filters, as regular-expression sources. */
   include?: string;
   exclude?: string;
@@ -121,6 +136,8 @@ export interface DiscoverResult {
   /** Unverified candidates added to the crawl queue. */
   enqueued: number;
   alreadyKnown: number;
+  /** Fetches not made because the page was already stored. */
+  skippedKnown: number;
   stoppedBecause: string;
 }
 
@@ -145,6 +162,18 @@ function compile(source: string | undefined): RegExp | null {
   } catch (error) {
     throw new Error(`invalid filter pattern "${source}": ${String(error)}`);
   }
+}
+
+/**
+ * Sitemaps are commonly published gzipped, and arrive one of two ways: as
+ * `Content-Encoding: gzip`, which `fetch` has already undone by the time we see
+ * the body, or as `application/gzip` bytes it has not touched. Keying on the
+ * gzip magic number rather than on the `.gz` in the URL handles both, and also
+ * the servers that get the labelling wrong in either direction.
+ */
+export function decodeSitemap(bytes: Uint8Array): string {
+  const gzipped = bytes.length > 2 && bytes[0] === 0x1f && bytes[1] === 0x8b;
+  return new TextDecoder().decode(gzipped ? gunzipSync(bytes) : bytes);
 }
 
 /**
@@ -173,7 +202,7 @@ async function collectSitemapUrls(
   const robots = await robotsFor(seedUrl);
 
   // robots.txt usually names the canonical host and our guesses are built from
-  // the www-stripped seed, so the same document arrives under two spellings.
+  // the seed's origin, so the same document can arrive under two spellings.
   // Canonicalizing before de-duplication collapses them into one fetch.
   const normalize = (value: string) => {
     try {
@@ -182,9 +211,23 @@ async function collectSitemapUrls(
       return null;
     }
   };
+  // Guess against both spellings of the host. A seed typed as the bare domain
+  // is not just a cosmetic difference: on a site like food.com the apex 301s
+  // every path to the homepage, so robots.txt comes back as HTML with no
+  // sitemaps in it and every guess below it lands on the homepage too. Trying
+  // the `www.` form as well is what makes discovery work from either spelling.
+  // `otherHostSpelling` round-trips through `URL`, which renders a bare origin
+  // with a trailing slash; take `.origin` back off it so the guesses below do
+  // not end up with a doubled separator.
+  const swapped = otherHostSpelling(origin);
+  const otherOrigin = swapped === null ? null : new URL(swapped).origin;
+  const guesses = [origin, otherOrigin]
+    .filter((value): value is string => value !== null)
+    .flatMap((base) => [`${base}/sitemap.xml`, `${base}/sitemap_index.xml`]);
+
   const pending = [
     ...new Set(
-      [...robots.sitemaps, `${origin}/sitemap.xml`, `${origin}/sitemap_index.xml`]
+      [...robots.sitemaps, ...guesses]
         .map(normalize)
         .filter((value): value is string => value !== null),
     ),
@@ -199,22 +242,15 @@ async function collectSitemapUrls(
 
     let body: string | null = null;
     try {
-      const result = await fetchText(target, undefined, 'application/xml,text/xml,text/plain');
-      body = result.body;
+      const result = await fetchBytes(target);
       files++;
-      if (!body) {
+      if (!result.bytes) {
         log.debug(`sitemap ${target} -> HTTP ${result.status}`);
         continue;
       }
+      body = decodeSitemap(result.bytes);
     } catch (error) {
       log.debug(`sitemap ${target} failed: ${String(error)}`);
-      continue;
-    }
-
-    // Gzipped sitemaps arrive as bytes we cannot read as text; skip rather than
-    // pretend. `.xml.gz` is common enough to be worth saying so out loud.
-    if (target.endsWith('.gz')) {
-      log.warn(`skipping gzipped sitemap (not supported): ${target}`);
       continue;
     }
 
@@ -269,6 +305,22 @@ export async function discover(
   seedInput: string,
   options: DiscoverOptions = {},
 ): Promise<DiscoverResult> {
+  return withRun('discover', { seed: seedInput, mode: options.mode ?? 'auto' }, async (run) => {
+    const result = await discoverWithin(seedInput, options);
+    run.bump('pages_fetched', result.pagesFetched);
+    run.bump('reused_from_store', result.skippedKnown);
+    run.bump('candidates', result.candidates.length);
+    run.bump('ingested', result.ingested);
+    run.bump('enqueued', result.enqueued);
+    run.bump('already_known', result.alreadyKnown);
+    return result;
+  });
+}
+
+async function discoverWithin(
+  seedInput: string,
+  options: DiscoverOptions = {},
+): Promise<DiscoverResult> {
   const seed = canonicalizeUrl(seedInput);
   const domain = domainOf(seed);
   const {
@@ -279,6 +331,7 @@ export async function discover(
     verify = false,
     dryRun = false,
     includeSubdomains = false,
+    refetch = false,
     signal,
   } = options;
 
@@ -291,8 +344,33 @@ export async function discover(
 
   const candidates = new Map<string, Candidate>();
   let pagesFetched = 0;
+  let skippedKnown = 0;
   let stoppedBecause = 'exhausted';
   let usedMode: 'sitemap' | 'links' = 'links';
+
+  /**
+   * The page, from the store when the engine already has it, from the network
+   * otherwise.
+   *
+   * Reusing the stored copy rather than skipping the URL outright is what keeps
+   * a second run useful: a hub page walked last week still carries the links
+   * this walk needs, and re-reading them costs the source nothing. `fresh` says
+   * whether these bytes are new, and so whether they are worth storing.
+   */
+  const load = async (
+    url: string,
+  ): Promise<{ html: string | null; status: number; fresh: boolean }> => {
+    if (!refetch) {
+      const stored = await storedPage(url);
+      if (stored) {
+        skippedKnown++;
+        return { html: stored.html, status: stored.httpStatus, fresh: false };
+      }
+    }
+    const result = await fetchPage(url);
+    pagesFetched++;
+    return { html: result.html, status: result.status, fresh: true };
+  };
 
   const record = (candidate: Candidate) => {
     const existing = candidates.get(candidate.url);
@@ -329,7 +407,14 @@ export async function discover(
     const strong = urls.filter((url) => classifyUrl(url) === 'recipe');
     const chosen = strong.length > 0 ? strong : urls.filter((url) => classifyUrl(url) === 'maybe');
 
-    for (const url of chosen.slice(0, maxResults)) {
+    // Drop what is already stored before the result cap applies, so a second
+    // run against a mostly-crawled site returns what is new rather than
+    // spending `maxResults` re-reporting what is not.
+    const known = refetch ? new Set<string>() : await alreadyStored(chosen);
+    skippedKnown += known.size;
+    const fresh = chosen.filter((url) => !known.has(url));
+
+    for (const url of fresh.slice(0, maxResults)) {
       record({ url, via: 'sitemap', verified: false, depth: 0 });
     }
 
@@ -350,15 +435,18 @@ export async function discover(
           continue;
         }
         try {
-          const result = await fetchPage(candidate.url);
-          pagesFetched++;
+          const result = await load(candidate.url);
           const recipe = result.html ? extractRecipe(result.html, candidate.url).recipe : null;
+          // Keep the page either way: it was fetched as a recipe candidate, so
+          // even a miss is worth storing rather than paying for twice.
+          if (!dryRun && result.fresh && result.html) {
+            await ingestFetchedPage(candidate.url, result.html, result.status);
+          }
           if (!recipe) {
             candidates.delete(candidate.url);
             continue;
           }
           record({ ...candidate, verified: true, title: recipe.name ?? titleOf(result.html!) });
-          if (!dryRun) await ingestFetchedPage(candidate.url, result.html!, result.status);
         } catch (error) {
           log.warn(`verify failed: ${candidate.url}`, String(error));
           candidates.delete(candidate.url);
@@ -394,8 +482,19 @@ export async function discover(
     // listings before it reaches a single recipe. Pages that might themselves
     // be recipes are drained first; hubs are the fallback, read for their links
     // when nothing more promising is waiting.
-    const likely: { url: string; depth: number }[] = [];
-    const hubs: { url: string; depth: number }[] = [{ url: seed, depth: 0 }];
+    // `candidate` records why the page is being fetched: to answer "is this a
+    // recipe?" or only to read its links. It decides whether a miss is worth a
+    // crawl-queue row, so a category listing does not land in the queue as a
+    // failure it was never a candidate for.
+    interface Walk {
+      url: string;
+      depth: number;
+      candidate: boolean;
+    }
+    const likely: Walk[] = [];
+    const hubs: Walk[] = [
+      { url: seed, depth: 0, candidate: classifyUrl(seed) !== 'hub' },
+    ];
     const next = () => likely.shift() ?? hubs.shift();
     const seen = new Set<string>([seed]);
     let banked = 0;
@@ -414,7 +513,7 @@ export async function discover(
         break;
       }
 
-      const { url, depth } = next()!;
+      const { url, depth, candidate } = next()!;
 
       if (!(await isAllowed(url))) {
         log.debug(`robots.txt disallows ${url}`);
@@ -423,11 +522,12 @@ export async function discover(
 
       let html: string | null = null;
       let status = 0;
+      let fresh = true;
       try {
-        const result = await fetchPage(url);
+        const result = await load(url);
         html = result.html;
         status = result.status;
-        pagesFetched++;
+        fresh = result.fresh;
       } catch (error) {
         log.warn(`fetch failed: ${url}`, String(error));
         continue;
@@ -446,10 +546,18 @@ export async function discover(
           title: recipe.name ?? titleOf(html),
           depth,
         });
-        if (!dryRun) await ingestFetchedPage(url, html, status);
         log.info(`recipe ${candidates.size}/${maxResults}: ${recipe.name ?? url}`);
         // Recipe pages do link to other recipes ("related"), so their links are
         // still worth reading - the depth limit is what stops the walk.
+      }
+
+      // Keep every page this walk actually downloaded. A candidate gets a
+      // crawl-queue row recording how it turned out; a hub was only ever read
+      // for its links, so it is stored without one rather than filling the
+      // queue with failures for pages nobody asked to be recipes.
+      if (!dryRun && fresh) {
+        if (candidate || recipe) await ingestFetchedPage(url, html, status);
+        else await storeFetchedPage(url, html, status);
       }
 
       let queued = 0;
@@ -469,7 +577,11 @@ export async function discover(
 
         if (depth + 1 > maxDepth) continue;
         seen.add(link);
-        (verdict === 'maybe' ? likely : hubs).push({ url: link, depth: depth + 1 });
+        (verdict === 'maybe' ? likely : hubs).push({
+          url: link,
+          depth: depth + 1,
+          candidate: verdict === 'maybe',
+        });
         queued++;
       }
 
@@ -491,16 +603,21 @@ export async function discover(
   const ingested = found.filter((c) => c.verified).length;
   let enqueued = 0;
 
-  const unverified = found.filter((c) => !c.verified).map((c) => c.url);
+  // Queueing a URL whose page is already stored would send `crawl` to fetch
+  // bytes we are holding, which is the same waste one layer down.
+  const unverifiedAll = found.filter((c) => !c.verified).map((c) => c.url);
+  const storedAlready = refetch ? new Set<string>() : await alreadyStored(unverifiedAll);
+  const unverified = unverifiedAll.filter((url) => !storedAlready.has(url));
   if (!dryRun && unverified.length > 0) {
     enqueued = await enqueue(unverified);
   }
 
+  const reuse = skippedKnown ? `, ${skippedKnown} read from store instead of refetched` : '';
   log.info(
     dryRun
       ? `discovery done (preview, nothing written): ${found.length} candidate(s) from ` +
-        `${pagesFetched} fetch(es), ${ingested} of them confirmed recipes (${stoppedBecause})`
-      : `discovery done: ${found.length} candidate(s) from ${pagesFetched} fetch(es) - ` +
+        `${pagesFetched} fetch(es)${reuse}, ${ingested} of them confirmed recipes (${stoppedBecause})`
+      : `discovery done: ${found.length} candidate(s) from ${pagesFetched} fetch(es)${reuse} - ` +
         `${ingested} ingested outright, ${enqueued} queued (${stoppedBecause})`,
   );
 
@@ -512,7 +629,8 @@ export async function discover(
     candidates: found,
     ingested: dryRun ? 0 : ingested,
     enqueued,
-    alreadyKnown: dryRun ? 0 : unverified.length - enqueued,
+    alreadyKnown: dryRun ? 0 : storedAlready.size + (unverified.length - enqueued),
+    skippedKnown,
     stoppedBecause,
   };
 }

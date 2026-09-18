@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import {
   View,
   Text,
+  Pressable,
   TouchableOpacity,
   TextInput,
   ScrollView,
@@ -11,25 +12,38 @@ import { Container } from 'components/Container';
 import { StatusBar } from 'expo-status-bar';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useShopping, ShoppingItem } from '../../lib/ShoppingContext';
+import { useTranslation } from '../../lib/i18n';
+
+type CategoryId = 'all' | 'recipe' | 'manual';
 
 interface Category {
-  id: string;
-  name: string;
+  id: CategoryId;
   active: boolean;
 }
 
+// The filters hold ids only; their labels and their empty states are looked up
+// at render time so they follow the language.
 const initialCategories: Category[] = [
-  { id: 'all', name: 'All Items', active: true },
-  { id: 'recipe', name: 'Recipe Items', active: false },
-  { id: 'manual', name: 'Manual Items', active: false },
+  { id: 'all', active: true },
+  { id: 'recipe', active: false },
+  { id: 'manual', active: false },
 ];
 
 export default function Shopping() {
-  const { items, toggleItemCheck, removeItem, removeRecipeItems, addItem, clearAllItems } = useShopping();
+  const { t } = useTranslation();
+  const { items, toggleItemCheck, removeItem, removeRecipeItems, addItem, clearAllItems } =
+    useShopping();
   const [categories, setCategories] = useState<Category[]>(initialCategories);
   const [newItem, setNewItem] = useState('');
   const [newQuantity, setNewQuantity] = useState('');
   const [showQuantityInput, setShowQuantityInput] = useState(false);
+
+  const categoryLabel = (id: CategoryId) =>
+    id === 'recipe'
+      ? t('shopping.filterRecipe')
+      : id === 'manual'
+        ? t('shopping.filterManual')
+        : t('shopping.filterAll');
 
   const addNewItem = () => {
     if (newItem.trim()) {
@@ -59,39 +73,38 @@ export default function Shopping() {
     addNewItem();
   };
 
-  const setActiveCategory = (categoryId: string) => {
-    setCategories(categories.map(cat => 
-      cat.id === categoryId 
-        ? { ...cat, active: true }
-        : { ...cat, active: false }
-    ));
+  const setActiveCategory = (categoryId: CategoryId) => {
+    setCategories(
+      categories.map((cat) =>
+        cat.id === categoryId ? { ...cat, active: true } : { ...cat, active: false }
+      )
+    );
   };
 
   const getTotalItems = () => items.length;
 
+  const getRecipeItems = () => items.filter((item) => item.category === 'recipe');
+  const getManualItems = () => items.filter((item) => item.category === 'manual');
 
-  const getRecipeItems = () => items.filter(item => item.category === 'recipe');
-  const getManualItems = () => items.filter(item => item.category === 'manual');
-  
   const getRecipeItemsBySource = () => {
     const recipeItems = getRecipeItems();
     const groupedBySource: { [key: string]: typeof recipeItems } = {};
-    
-    recipeItems.forEach(item => {
-      const source = item.recipeSource || 'Unknown Recipe';
+
+    recipeItems.forEach((item) => {
+      const source = item.recipeSource || t('shopping.unknownRecipe');
       if (!groupedBySource[source]) {
         groupedBySource[source] = [];
       }
       groupedBySource[source].push(item);
     });
-    
+
     return groupedBySource;
   };
 
   const getFilteredItems = () => {
-    const activeCategory = categories.find(cat => cat.active);
+    const activeCategory = categories.find((cat) => cat.active);
     if (!activeCategory) return items;
-    
+
     switch (activeCategory.id) {
       case 'recipe':
         return getRecipeItems();
@@ -103,44 +116,28 @@ export default function Shopping() {
   };
 
   const getFilteredRecipeItemsBySource = () => {
-    const activeCategory = categories.find(cat => cat.active);
+    const activeCategory = categories.find((cat) => cat.active);
     if (activeCategory?.id === 'manual') {
       return {};
     }
     return getRecipeItemsBySource();
   };
 
+  const activeCategoryId = categories.find((cat) => cat.active)?.id ?? 'all';
+
   const renderShoppingItem = (item: ShoppingItem, showDeleteButton = false) => (
     <View key={item.id} style={styles.itemContainer}>
-      <TouchableOpacity
-        style={styles.itemContent}
-        onPress={() => toggleItemCheck(item.id)}
-      >
-        <View style={[
-          styles.checkbox,
-          item.checked && styles.checkedCheckbox
-        ]}>
-          {item.checked && (
-            <MaterialIcons name="check" size={16} color="white" />
-          )}
+      <TouchableOpacity style={styles.itemContent} onPress={() => toggleItemCheck(item.id)}>
+        <View style={[styles.checkbox, item.checked && styles.checkedCheckbox]}>
+          {item.checked && <MaterialIcons name="check" size={16} color="white" />}
         </View>
         <View style={styles.itemDetails}>
-          <Text style={[
-            styles.itemName,
-            item.checked && styles.checkedItemName
-          ]}>
-            {item.name}
-          </Text>
-          {item.quantity && (
-            <Text style={styles.itemQuantity}>{item.quantity}</Text>
-          )}
+          <Text style={[styles.itemName, item.checked && styles.checkedItemName]}>{item.name}</Text>
+          {item.quantity && <Text style={styles.itemQuantity}>{item.quantity}</Text>}
         </View>
       </TouchableOpacity>
       {showDeleteButton && (
-        <TouchableOpacity
-          style={styles.deleteButton}
-          onPress={() => removeItem(item.id)}
-        >
+        <TouchableOpacity style={styles.deleteButton} onPress={() => removeItem(item.id)}>
           <MaterialIcons name="close" size={20} color="#999" />
         </TouchableOpacity>
       )}
@@ -151,50 +148,51 @@ export default function Shopping() {
     <>
       <Container>
         <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 100 }}>
-         <View className="flex flex-col gap-4 mt-6">
-           {/* List Info */}
-           <View style={styles.listInfo}>
-            <View style={{
-              flexGrow: 1,
-            }}>
-              <Text style={styles.listTitle}>Weekly Shopping</Text>
-              <Text style={styles.listStats}>
-                {getTotalItems()} Items
-              </Text>
-            </View>
-            <TouchableOpacity style={styles.clearButton} onPress={clearAllItems}>
-              <Text style={styles.clearButtonText}>Clear All</Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* Category Filters */}
-          <View style={styles.categoryContainer}>
-            {categories.map(category => (
-              <TouchableOpacity
-                key={category.id}
-                style={[
-                  styles.categoryButton,
-                  category.active && styles.activeCategoryButton
-                ]}
-                onPress={() => setActiveCategory(category.id)}
-              >
-                <Text style={[
-                  styles.categoryText,
-                  category.active && styles.activeCategoryText
-                ]}>
-                  {category.name}
+          <View className="mt-6 flex flex-col gap-4">
+            {/* List Info */}
+            <View style={styles.listInfo}>
+              <View
+                style={{
+                  flexGrow: 1,
+                }}>
+                <Text style={styles.listTitle}>{t('shopping.title')}</Text>
+                <Text style={styles.listStats}>
+                  {t('shopping.itemCount', { count: getTotalItems() })}
                 </Text>
+              </View>
+              <TouchableOpacity style={styles.clearButton} onPress={clearAllItems}>
+                <Text style={styles.clearButtonText}>{t('shopping.clearAll')}</Text>
               </TouchableOpacity>
-            ))}
+            </View>
+
+            {/* Category Filters */}
+            <View style={styles.categoryContainer}>
+              {categories.map((category) => (
+                /* Pressable rather than TouchableOpacity: onPress re-renders this
+                 button with a new style, which strands TouchableOpacity's
+                 fade-back animation and leaves the active chip washed out. Keep
+                 the style a plain object/array -- NativeWind's jsx runtime
+                 ignores the ({ pressed }) => [] form. */
+                <Pressable
+                  key={category.id}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: category.active }}
+                  style={[styles.categoryButton, category.active && styles.activeCategoryButton]}
+                  onPress={() => setActiveCategory(category.id)}>
+                  <Text style={[styles.categoryText, category.active && styles.activeCategoryText]}>
+                    {categoryLabel(category.id)}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
           </View>
-         </View>
 
           {/* Add Item Input */}
           <View style={styles.addItemContainer}>
             <View style={styles.inputContainer}>
               <TextInput
                 style={styles.textInput}
-                placeholder="Add item..."
+                placeholder={t('shopping.addPlaceholder')}
                 value={newItem}
                 onChangeText={setNewItem}
                 onSubmitEditing={handleItemInputSubmit}
@@ -211,7 +209,7 @@ export default function Shopping() {
               <View style={styles.inputContainer}>
                 <TextInput
                   style={styles.textInput}
-                  placeholder="Quantity (optional)..."
+                  placeholder={t('shopping.quantityPlaceholder')}
                   value={newQuantity}
                   onChangeText={setNewQuantity}
                   onSubmitEditing={handleQuantityInputSubmit}
@@ -228,16 +226,18 @@ export default function Shopping() {
             <View style={styles.emptyState}>
               <MaterialIcons name="shopping-cart" size={64} color="#DDD" />
               <Text style={styles.emptyStateTitle}>
-                {categories.find(cat => cat.active)?.id === 'all' 
-                  ? 'Your shopping list is empty'
-                  : `No ${categories.find(cat => cat.active)?.name.toLowerCase()} found`
-                }
+                {/* One key per filter rather than a name dropped into a
+                    sentence: "No {noun} found" only reads well in English. */}
+                {activeCategoryId === 'all'
+                  ? t('shopping.emptyTitle')
+                  : activeCategoryId === 'recipe'
+                    ? t('shopping.emptyRecipeTitle')
+                    : t('shopping.emptyManualTitle')}
               </Text>
               <Text style={styles.emptyStateSubtitle}>
-                {categories.find(cat => cat.active)?.id === 'all'
-                  ? 'Add items manually or browse recipes to get started'
-                  : 'Try adding some items or switch to a different category'
-                }
+                {activeCategoryId === 'all'
+                  ? t('shopping.emptyHint')
+                  : t('shopping.emptyFilterHint')}
               </Text>
             </View>
           )}
@@ -247,26 +247,25 @@ export default function Shopping() {
             <View key={recipeSource} style={styles.section}>
               <View style={styles.sectionHeader}>
                 <Text style={styles.sectionTitle}>
-                  From: {recipeSource}
+                  {t('shopping.fromRecipe', { recipe: recipeSource })}
                 </Text>
                 <TouchableOpacity
                   style={styles.removeRecipeButton}
-                  onPress={() => removeRecipeItems(recipeSource)}
-                >
+                  onPress={() => removeRecipeItems(recipeSource)}>
                   <MaterialIcons name="delete-outline" size={20} color="#FF6B6B" />
                 </TouchableOpacity>
               </View>
-              {recipeItems.map(item => renderShoppingItem(item))}
+              {recipeItems.map((item) => renderShoppingItem(item))}
             </View>
           ))}
 
           {/* Manual Items Section */}
-          {getManualItems().length > 0 && categories.find(cat => cat.active)?.id !== 'recipe' && (
+          {getManualItems().length > 0 && activeCategoryId !== 'recipe' && (
             <View style={styles.section}>
               <View style={styles.sectionHeader}>
-                <Text style={styles.sectionTitle}>Manual Items</Text>
+                <Text style={styles.sectionTitle}>{t('shopping.manualSection')}</Text>
               </View>
-              {getManualItems().map(item => renderShoppingItem(item, true))}
+              {getManualItems().map((item) => renderShoppingItem(item, true))}
             </View>
           )}
         </ScrollView>

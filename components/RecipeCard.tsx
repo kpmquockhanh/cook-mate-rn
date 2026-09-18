@@ -1,10 +1,31 @@
-import { View, Text, Image, TouchableOpacity } from 'react-native';
+import { View, Text, TouchableOpacity } from 'react-native';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { getImageUrl } from '../utils/index';
+import RecipeThumbnail from './RecipeThumbnail';
+import { useFavorites } from '../lib/FavoritesContext';
 
-export default function RecipeCard({ recipe, showHeart = false }: { recipe: any; showHeart: boolean }) {
+/**
+ * The full-width row: used wherever a list says "here is everything", as
+ * opposed to a rail's "pick one of these".
+ *
+ * Slimmer than it was - the old 21pt padding around an 80pt image made four
+ * rows fill a phone screen - and the thumbnail now falls back to a tinted
+ * placeholder rather than a blank square, because most recipes ship without a
+ * photo (see RecipeThumbnail).
+ */
+export default function RecipeCard({
+  recipe,
+  showHeart = false,
+}: {
+  recipe: any;
+  showHeart: boolean;
+}) {
   const router = useRouter();
+  const { isFavorite, toggle } = useFavorites();
+  // The row carries the server's answer; the context carries anything the user
+  // has changed since, so the same recipe's heart agrees with itself wherever
+  // it appears.
+  const favorite = isFavorite(recipe.id, recipe.isFavorite === true);
 
   const handleRecipePress = () => {
     try {
@@ -15,76 +36,75 @@ export default function RecipeCard({ recipe, showHeart = false }: { recipe: any;
     }
   };
 
+  // 4 of 45 recipes carry no rating at all. Five empty stars next to a blank
+  // number is worse than no rating row, so the whole row is conditional.
+  const rating = typeof recipe.rating === 'number' && recipe.rating > 0 ? recipe.rating : null;
+  const aiScore = typeof recipe.aiScore === 'number' ? recipe.aiScore : null;
+
   return (
     <TouchableOpacity
       onPress={handleRecipePress}
-      className="mb-4 rounded-2xl border border-gray-100 bg-white p-4"
+      activeOpacity={0.85}
+      className="mb-3 flex-row items-center rounded-2xl bg-white p-3"
       style={{
-        borderColor: '#E5E5E5',
+        borderColor: '#EDEDED',
         borderWidth: 1,
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: .02,
+        shadowOpacity: 0.02,
         shadowRadius: 2,
-        elevation: 5,
-        padding: 21,
+        elevation: 2,
       }}>
-      
-      <View className="flex-row">
-        <Image
-          source={{ uri: getImageUrl(recipe.thumbnail) }}
-          className="mr-4 h-20 w-20 rounded-xl"
-          resizeMode="cover"
-        />
-        <View className="flex-1">
-          <View className="flex-row items-start justify-between">
-            <Text className="mr-2 flex-1 text-lg font-semibold text-gray-800">{recipe.title}</Text>
-            {showHeart && (
-              <TouchableOpacity>
-                <Ionicons
-                  name={recipe.isFavorite ? 'heart' : 'heart-outline'}
-                  size={24}
-                  color={recipe.isFavorite ? '#FF6B6B' : '#9CA3AF'}
-                />
-              </TouchableOpacity>
-            )}
-          </View>
+      <RecipeThumbnail recipe={recipe} width={68} height={68} radius={14} />
 
-          <View className="mt-2 flex-row items-center">
-            <Ionicons name="time-outline" size={16} color="#9CA3AF" />
-            <Text className="ml-1 mr-4 text-gray-500">{recipe.time}</Text>
-            <MaterialIcons name="signal-cellular-alt" size={16} color="#9CA3AF" />
-            <Text className="ml-1 text-gray-500">{recipe.difficulty}</Text>
-          </View>
+      <View className="ml-3 flex-1">
+        <View className="flex-row items-start justify-between">
+          <Text
+            className="mr-2 flex-1 text-[15px] font-semibold leading-5 text-gray-800"
+            numberOfLines={2}>
+            {recipe.title}
+          </Text>
+          {showHeart && (
+            <TouchableOpacity hitSlop={8} onPress={() => toggle(recipe.id, !favorite)}>
+              <Ionicons
+                name={favorite ? 'heart' : 'heart-outline'}
+                size={20}
+                color={favorite ? '#FF6B6B' : '#D1D5DB'}
+              />
+            </TouchableOpacity>
+          )}
+        </View>
 
-          <View className="mt-2 flex-row items-center">
-            <View className="flex-row">
-              {[1, 2, 3, 4, 5].map((star) => (
-                <Ionicons
-                  key={star}
-                  name={
-                    star <= Math.floor(recipe.rating)
-                      ? 'star'
-                      : star === Math.ceil(recipe.rating)
-                        ? 'star-half'
-                        : 'star-outline'
-                  }
-                  size={14}
-                  color="#FFD700"
-                />
-              ))}
+        <View className="mt-1.5 flex-row items-center">
+          <Ionicons name="time-outline" size={13} color="#9CA3AF" />
+          <Text className="ml-1 text-xs text-gray-500">{recipe.time}</Text>
+          {!!recipe.difficulty && (
+            <>
+              <MaterialIcons
+                name="signal-cellular-alt"
+                size={13}
+                color="#9CA3AF"
+                style={{ marginLeft: 10 }}
+              />
+              <Text className="ml-1 text-xs capitalize text-gray-500">{recipe.difficulty}</Text>
+            </>
+          )}
+
+          {rating !== null && (
+            <>
+              <Ionicons name="star" size={12} color="#FFC531" style={{ marginLeft: 10 }} />
+              <Text className="ml-1 text-xs text-gray-500">{rating.toFixed(1)}</Text>
+            </>
+          )}
+
+          {aiScore !== null && (
+            <View className="ml-auto flex-row items-center rounded-full bg-primary/10 px-2 py-0.5">
+              <Ionicons name="sparkles-outline" size={10} color="#ff6b6b" />
+              <Text className="ml-1 text-[11px] font-semibold text-primary">
+                {aiScore.toFixed(1)}
+              </Text>
             </View>
-            <Text className="ml-2 text-gray-500">{recipe.rating}</Text>
-
-            {typeof recipe.aiScore === 'number' && (
-              <View className="ml-3 flex-row items-center rounded-full bg-primary/10 px-2 py-0.5">
-                <Ionicons name="sparkles-outline" size={12} color="#ff6b6b" />
-                <Text className="ml-1 text-xs font-semibold text-primary">
-                  {recipe.aiScore.toFixed(1)}
-                </Text>
-              </View>
-            )}
-          </View>
+          )}
         </View>
       </View>
     </TouchableOpacity>

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { FunctionsHttpError } from '@supabase/supabase-js';
 import { supabase } from './supabase';
 import { errorMessage, logger } from './log';
+import { t } from './i18n/translate';
 
 const log = logger('livekit-token');
 
@@ -35,9 +36,9 @@ async function describeFunctionError(error: unknown): Promise<string> {
     } catch {
       // A non-JSON body is not worth failing the error path over.
     }
-    return `Voice service returned HTTP ${status ?? 'error'}`;
+    return t('voice.detailHttp', { status: status ?? 'error' });
   }
-  return errorMessage(error, 'Could not start the voice assistant');
+  return errorMessage(error, t('voice.detailTokenFailed'));
 }
 
 export interface UseLiveKitTokenResult {
@@ -78,7 +79,7 @@ export function useLiveKitToken(recipeId: string | null): UseLiveKitTokenResult 
 
       if (fnError) throw fnError;
       if (!data?.token || !data?.serverUrl) {
-        throw new Error('Token endpoint returned an incomplete response');
+        throw new Error(t('voice.detailIncompleteToken'));
       }
 
       if (id !== requestId.current) return;

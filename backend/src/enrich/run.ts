@@ -12,20 +12,31 @@ const log = logger('enrich');
  * older prompt version - bumping ENRICHMENT_VERSION re-runs the whole corpus
  * from stored raw pages without touching the network. Human-edited rows are
  * never overwritten.
+ *
+ * `includePublished` reaches rows that are already live. Without it, a bumped
+ * version only ever improves recipes nobody has seen yet, which stopped being
+ * acceptable once the publisher started deriving facets - meal, cuisine,
+ * hands-on time - from what the model says. Re-enriching costs one model call
+ * per row and changes nothing on its own: the rows have to be republished
+ * (`publish --republish`) for the app to see the difference.
  */
 export async function enrichAll(
   limit: number,
-  options: { escalate?: boolean; concurrency?: number } = {},
+  options: { escalate?: boolean; concurrency?: number; includePublished?: boolean } = {},
 ): Promise<{ ok: number; failed: number }> {
+  const statuses = options.includePublished
+    ? ['parsed', 'enriched', 'review', 'published']
+    : ['parsed', 'enriched', 'review'];
+
   const rows = await query<StagingRow>(
     `select * from crawler.recipe_staging
       where edited_by_human = false
-        and status in ('parsed', 'enriched', 'review')
+        and status = any($3)
         and (enrichment_version is null or enrichment_version < $1)
         and jsonb_array_length(steps) > 0
       order by id
       limit $2`,
-    [env.enrichmentVersion, limit],
+    [env.enrichmentVersion, limit, statuses],
   );
 
   if (rows.length === 0) {
@@ -59,7 +70,13 @@ export async function enrichAll(
                 enrichment_model   = $4,
                 servings           = coalesce($5, servings),
                 total_time_seconds = coalesce($6, total_time_seconds),
-                status             = 'enriched',
+                -- A row that is already live stays live. Sending it back to
+                -- 'enriched' would drop it out of the set that
+                -- publish --republish looks at, so the improved enrichment
+                -- could never reach the app, and the row would need re-gating
+                -- to get back.
+                status             = case when status = 'published'
+                                          then 'published' else 'enriched' end,
                 enriched_at        = now()
           where id = $1 and edited_by_human = false`,
         [

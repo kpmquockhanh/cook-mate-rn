@@ -1,5 +1,8 @@
 import pg from 'pg';
 import { env } from './env.js';
+import { logger } from './log.js';
+
+const log = logger('db');
 
 // Postgres NUMERIC arrives as a string by default; we want numbers everywhere.
 pg.types.setTypeParser(pg.types.builtins.NUMERIC, (v) => (v === null ? null : Number(v)));
@@ -16,8 +19,20 @@ export function pool(): pg.Pool {
       // Supabase CLI and psql `sslmode=require` do.
       ssl: env.databaseUrl.includes('localhost') ? undefined : { rejectUnauthorized: false },
       // Without this a wrong host hangs the API request (or the test suite)
-      // instead of failing; pg waits indefinitely by default.
-      connectionTimeoutMillis: 10_000,
+      // instead of failing; pg waits indefinitely by default. It is generous
+      // because a pooler in a distant region can legitimately take several
+      // seconds, and a timeout shorter than a healthy connect turns ordinary
+      // latency into an outage.
+      connectionTimeoutMillis: env.dbConnectTimeoutMs,
+    });
+
+    // An idle client whose connection drops - a laptop sleeping, wifi changing,
+    // a pooler recycling - makes pg emit 'error' on the POOL, not on any query.
+    // Node treats an unhandled 'error' event as fatal, so without this listener
+    // a transient network blip takes down the console or the API rather than
+    // costing one reconnect.
+    poolRef.on('error', (error) => {
+      log.warn('idle client error (the pool will reconnect)', String(error));
     });
   }
   return poolRef;
