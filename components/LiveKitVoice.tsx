@@ -351,6 +351,20 @@ const LiveKitVoice: React.FC<LiveKitVoiceProps> = ({
           }}
           options={{
             adaptiveStream: { pixelDensity: 'screen' },
+            // The phone is on the counter with the speaker facing the room, so
+            // the agent's own voice is loud in the microphone. Uncancelled, the
+            // worker's VAD reads that as the user barging in and abandons the
+            // reply mid-sentence. Mono at a speech rate for the same reason the
+            // web build uses it: nothing downstream benefits from more.
+            audioCaptureDefaults: {
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: true,
+              channelCount: 1,
+            },
+            // DTX stops sending packets during silence, so the server's VAD is
+            // not fed a steady trickle of near-silent frames between words.
+            publishDefaults: { dtx: true, red: true },
           }}>
           <RoomView
             cookingState={cookingState}

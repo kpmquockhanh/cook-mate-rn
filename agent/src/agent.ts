@@ -12,6 +12,18 @@ import {
 import { RoomEvent, type Participant } from '@livekit/rtc-node';
 import { fileURLToPath } from 'node:url';
 import { AGENT_NAME } from './constants.js';
+import { TTS as OmniVoiceTTS } from './omnivoice-tts.js';
+import {
+  LANGUAGE,
+  LANGUAGE_NAME,
+  TURN_DETECTION,
+  endpointingOptions,
+  interruptionOptions,
+  noiseCancellation,
+  numberEnv,
+  optionalEnv,
+  vadOptions,
+} from './speech-config.js';
 import {
   COOKING_STATE_ATTRIBUTE,
   buildInstructions,
@@ -21,6 +33,50 @@ import {
 
 /** How long to wait for the app's first state publish before greeting anyway. */
 const CONTEXT_WAIT_MS = 2000;
+
+/**
+ * Speech comes from a self-hosted omnivoice-server when `OMNIVOICE_URL` names
+ * one, and from LiveKit Inference otherwise. Keeping the fallback means an
+ * environment that has only the LiveKit credentials still talks - the worker
+ * does not need a second service just to say hello.
+ */
+function buildTTS() {
+  const baseURL = optionalEnv('OMNIVOICE_URL');
+  if (!baseURL) {
+    // Inworld is the default because it is the one LiveKit Inference TTS that
+    // covers Vietnamese. Cartesia's sonic-3 - the previous default - speaks 40+
+    // languages but not this one, so it was reading Vietnamese text with English
+    // phonetics. Override the trio below to use any other provider.
+    const model = optionalEnv('TTS_MODEL') ?? 'inworld/inworld-tts-2';
+    const voice = optionalEnv('TTS_VOICE') ?? 'Ashley';
+    const language = optionalEnv('TTS_LANGUAGE') ?? LANGUAGE;
+    console.log(`[cookmate] TTS: LiveKit Inference ${model} (voice "${voice}", language ${language})`);
+    return new inference.TTS({ model, voice, language });
+  }
+
+  const instructions = optionalEnv('OMNIVOICE_INSTRUCTIONS');
+
+  // Synthesis is roughly half of real time on CPU, so the diffusion step count
+  // is the one knob that decides whether replies arrive late. Lower it there.
+  const rawNumStep = optionalEnv('OMNIVOICE_NUM_STEP');
+  const numStep = rawNumStep === undefined ? undefined : Number(rawNumStep);
+  if (numStep !== undefined && !Number.isFinite(numStep)) {
+    console.warn(`[cookmate] Ignoring OMNIVOICE_NUM_STEP: "${rawNumStep}" is not a number`);
+  }
+
+  console.log(
+    `[cookmate] TTS: omnivoice-server at ${baseURL} ` +
+      `(${instructions ? `instructions "${instructions}"` : `voice "${optionalEnv('OMNIVOICE_VOICE') ?? 'fable'}"`})`
+  );
+  return new OmniVoiceTTS({
+    baseURL,
+    apiKey: optionalEnv('OMNIVOICE_API_KEY'),
+    // `instructions` is the server's strongest control and overrides the preset
+    // in `voice`, so only one of the two is ever sent.
+    ...(instructions ? { instructions } : { voice: optionalEnv('OMNIVOICE_VOICE') ?? 'fable' }),
+    ...(numStep !== undefined && Number.isFinite(numStep) ? { numStep } : {}),
+  });
+}
 
 /**
  * Invoke an RPC method on the app and hand its result back to the LLM. The app
@@ -101,18 +157,41 @@ export default defineAgent({
     });
 
     const session = new voice.AgentSession({
-      stt: new inference.STT({ model: 'deepgram/nova-3', language: 'en' }),
-      llm: new inference.LLM({ model: 'google/gemini-2.5-flash' }),
-      tts: new inference.TTS({
-        model: 'cartesia/sonic-3',
-        voice: '79a125e8-cd45-4c13-8a67-188112f4dd22',
+      stt: new inference.STT({
+        model: optionalEnv('STT_MODEL') ?? 'deepgram/nova-3',
+        language: optionalEnv('STT_LANGUAGE') ?? LANGUAGE,
       }),
-      vad: new inference.VAD(),
+      llm: new inference.LLM({ model: optionalEnv('LLM_MODEL') ?? 'google/gemini-2.5-flash' }),
+      tts: buildTTS(),
+      vad: new inference.VAD(vadOptions),
+      // Turn taking, i.e. the fix for the agent answering four times while the
+      // user was still speaking one sentence. See `speech-config.ts` for what
+      // each group does and why the defaults there are looser than stock.
+      turnHandling: {
+        turnDetection: TURN_DETECTION,
+        endpointing: endpointingOptions,
+        interruption: interruptionOptions,
+        // Preemptive generation starts an LLM call on the *interim* transcript
+        // and throws it away if the user keeps talking. With a jumpy VAD that is
+        // several concurrent generations per utterance - exactly the pile-up in
+        // the logs - and the wasted calls are billed. Off unless asked for.
+        preemptiveGeneration: { enabled: optionalEnv('PREEMPTIVE_GENERATION') === 'true' },
+      },
+      // Suppress interruptions for the first few seconds of each agent turn,
+      // while the browser's echo canceller is still adapting to the new voice.
+      // This is when self-echo is loudest and most likely to be mistaken for
+      // the user barging in.
+      aecWarmupDuration: numberEnv('AEC_WARMUP_MS', 3000),
     });
+
+    // Cloud-only, so opt-in; strips kitchen noise and other voices before the
+    // VAD ever sees them.
+    const nc = noiseCancellation();
 
     await session.start({
       agent,
       room: ctx.room,
+      inputOptions: nc ? { noiseCancellation: nc } : undefined,
     });
 
     // Resolves as soon as the app publishes its first state, so the greeting can
@@ -158,9 +237,11 @@ export default defineAgent({
     clearTimeout(contextTimer);
 
     await session.generateReply({
-      instructions: initialState
-        ? `Greet the user, mention that you will be helping them cook ${initialState.title}, and ask if they are ready to start.`
-        : 'Greet the user and ask if they are ready to start cooking.',
+      instructions:
+        (initialState
+          ? `Greet the user, mention that you will be helping them cook ${initialState.title}, and ask if they are ready to start.`
+          : 'Greet the user and ask if they are ready to start cooking.') +
+        ` Speak in ${LANGUAGE_NAME}. Keep it to one or two short sentences.`,
     });
   },
 });

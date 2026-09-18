@@ -36,6 +36,13 @@ services:
     build: ./agent
     command: ["npm", "run", "start"]
     env_file: ./agent/.env
+    # omnivoice-server runs on the host, not in this file: it wants the GPU and
+    # a multi-gigabyte model cache, so containerizing it here would be a second,
+    # much heavier decision. `127.0.0.1` inside the container is the container,
+    # so an OMNIVOICE_URL pointing at a host-run server has to say
+    # http://host.docker.internal:8880 - which is what this mapping resolves.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "8082:8082"
     restart: unless-stopped

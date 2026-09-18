@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { View, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import {
+  ConnectionState,
   ParticipantKind,
   Room,
   RoomEvent,
@@ -108,6 +109,11 @@ const LiveKitVoice: React.FC<LiveKitVoiceProps> = ({
   const [session, setSession] = useState<Session>(READY);
   const [agentSpeaking, setAgentSpeaking] = useState(false);
   const roomRef = useRef<Room | null>(null);
+  // Whether the signal channel is actually up, which is not the same question as
+  // whether the session is live: 'connecting' is live (it can be torn down) but
+  // publishing attributes then makes setAttributes time out rather than queue.
+  // Driven by the room's own state so a reconnect re-publishes once it settles.
+  const [roomConnected, setRoomConnected] = useState(false);
 
   // One place reports every transition, so the screen's banner and the logs can
   // never disagree about what the session is doing. The ref holds the callback
@@ -141,6 +147,7 @@ const LiveKitVoice: React.FC<LiveKitVoiceProps> = ({
     const room = roomRef.current;
     roomRef.current = null;
     setAgentSpeaking(false);
+    setRoomConnected(false);
     if (room) await room.disconnect();
   }, []);
 
@@ -154,18 +161,37 @@ const LiveKitVoice: React.FC<LiveKitVoiceProps> = ({
   // on every step change - including manual taps - so the agent never narrates
   // a step the user has already moved past.
   const serializedState = cookingState ? serializeCookingState(cookingState) : null;
-  const liveStatus = isLive(session.status) ? session.status : null;
   useEffect(() => {
-    if (!serializedState || !liveStatus) return;
+    if (!serializedState || !roomConnected) return;
     const room = roomRef.current;
     if (!room) return;
     room.localParticipant
       .setAttributes({ [COOKING_STATE_ATTRIBUTE]: serializedState })
       .catch((e: unknown) => log.error('Failed to publish cooking state', e));
-  }, [serializedState, liveStatus]);
+  }, [serializedState, roomConnected]);
 
   const connect = useCallback(async () => {
-    const room = new Room({ adaptiveStream: { pixelDensity: 'screen' } });
+    const room = new Room({
+      adaptiveStream: { pixelDensity: 'screen' },
+      // The agent's own voice comes out of the laptop speaker and straight back
+      // into the microphone. Without cancellation the worker's VAD hears that as
+      // the user talking, opens a turn on it, and cuts its own reply short - a
+      // loop of half-spoken answers. These are browser defaults in most cases,
+      // but Safari and some Android builds do not apply them unless asked, so
+      // they are stated rather than assumed.
+      audioCaptureDefaults: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+        // Mono at a speech rate: the extra bandwidth of stereo 48k buys nothing
+        // for speech recognition and gives the echo canceller more to chew on.
+        channelCount: 1,
+      },
+      // Opus DTX stops sending packets during silence. That keeps the server's
+      // VAD from seeing a steady stream of near-silent frames between words,
+      // which is part of what made turns fragment.
+      publishDefaults: { dtx: true, red: true },
+    });
     roomRef.current = room;
 
     let agentTimer: ReturnType<typeof setTimeout> | undefined;
@@ -203,6 +229,9 @@ const LiveKitVoice: React.FC<LiveKitVoiceProps> = ({
       })
       .on(RoomEvent.ParticipantConnected, checkAgent)
       .on(RoomEvent.ParticipantDisconnected, checkAgent)
+      .on(RoomEvent.ConnectionStateChanged, (state: ConnectionState) => {
+        setRoomConnected(state === ConnectionState.Connected);
+      })
       .on(RoomEvent.ActiveSpeakersChanged, (speakers) => {
         setAgentSpeaking(speakers.some((s) => s.kind === ParticipantKind.AGENT));
       })
@@ -220,6 +249,7 @@ const LiveKitVoice: React.FC<LiveKitVoiceProps> = ({
         clearTimeout(agentTimer);
         roomRef.current = null;
         setAgentSpeaking(false);
+        setRoomConnected(false);
         // A teardown after a failure also lands here - keep the reason.
         setSession((current) => (isLive(current.status) ? READY : current));
       });
