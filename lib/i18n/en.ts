@@ -107,6 +107,19 @@ const en = {
   'facet.pescatarian': 'Pescatarian',
   'facet.glutenFree': 'Gluten free',
 
+  // --- Filter sheet ---------------------------------------------------------
+  'filter.open': 'Filters',
+  'filter.title': 'Filters',
+  'filter.close': 'Close filters',
+  'filter.time': 'Time',
+  'filter.meal': 'Meal',
+  'filter.ingredient': 'Main ingredient',
+  'filter.diet': 'Diet',
+  'filter.difficulty': 'Difficulty',
+  'filter.more': 'More',
+  'filter.clearAll': 'Clear all',
+  'filter.apply': 'Show recipes',
+
   // --- Search ---------------------------------------------------------------
   'search.placeholder': 'Search recipes...',
   'search.loadingMore': 'Loading more recipes...',

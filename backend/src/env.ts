@@ -86,6 +86,25 @@ export const env = {
   },
   enrichmentVersion: int('ENRICHMENT_VERSION', 1),
 
+  // ---- Stage 5 translation (src/translate) ----
+  // Restating text that is already on the row, so the cheap tier does it; the
+  // escalation model is shared with enrichment rather than given its own knob,
+  // because "the better model from this provider" is one fact, not two.
+  get translateModel() {
+    const key = provider();
+    return resolveModel('TRANSLATE_MODEL', key, PROVIDER_MODELS[key].model);
+  },
+  // Bump to re-translate the whole corpus after a prompt change - the same
+  // lever ENRICHMENT_VERSION is, for the stage that reads published rows. The
+  // old translation keeps serving until a new one replaces it (migration 0016).
+  translationVersion: int('TRANSLATION_VERSION', 1),
+  // Which languages `translate` runs for when none is named. Comma-separated,
+  // and every entry must be a key of TARGET_LANGUAGES in translate/llm.ts.
+  translateLocales: (process.env.TRANSLATE_LOCALES ?? 'vi')
+    .split(',')
+    .map((locale) => locale.trim().toLowerCase())
+    .filter(Boolean),
+
   // ---- Tier D extraction (src/crawl/prose.ts) ----
   // Reads pages the free tiers could not, so it costs money per page and is
   // budgeted rather than run over everything.

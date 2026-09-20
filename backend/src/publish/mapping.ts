@@ -78,3 +78,63 @@ export const MAPPING = {
 } as const;
 
 export type Mapping = typeof MAPPING;
+
+/**
+ * The translation overlay (migration 0015), kept apart from MAPPING because
+ * the publisher does not write it - the translation stage does, and the API
+ * reads it. Preflight still checks it, so a half-applied migration is caught
+ * by `npm run publish -- --check` rather than by a blank recipe screen.
+ *
+ * Children are keyed by (recipeId, locale, sortOrder), not by the child row's
+ * id: publish/run.ts replaces every child row on each publish, so child ids do
+ * not survive a republish and `sort_order` is the only stable handle.
+ */
+export const TRANSLATION_MAPPING = {
+  recipe: {
+    table: 'public.recipe_translations',
+    columns: {
+      recipeId: 'recipe_id',
+      locale: 'locale',
+      title: 'title',
+      description: 'description',
+      cuisine: 'cuisine',
+      sourceFingerprint: 'source_fingerprint',
+      // Migration 0016: the lever that re-runs the stage after a prompt change.
+      translationVersion: 'translation_version',
+      model: 'model',
+      translatedAt: 'translated_at',
+    },
+  },
+  ingredients: {
+    table: 'public.recipe_ingredient_translations',
+    columns: {
+      recipeId: 'recipe_id',
+      locale: 'locale',
+      sortOrder: 'sort_order',
+      ingredientText: 'ingredient_text',
+      amount: 'amount',
+    },
+  },
+  instructions: {
+    table: 'public.recipe_instruction_translations',
+    columns: {
+      recipeId: 'recipe_id',
+      locale: 'locale',
+      sortOrder: 'sort_order',
+      instructionText: 'instruction_text',
+      timerName: 'timer_name',
+      ingredients: 'ingredients',
+    },
+  },
+  notes: {
+    table: 'public.recipe_note_translations',
+    columns: {
+      recipeId: 'recipe_id',
+      locale: 'locale',
+      sortOrder: 'sort_order',
+      noteText: 'note_text',
+    },
+  },
+} as const;
+
+export type TranslationMapping = typeof TRANSLATION_MAPPING;

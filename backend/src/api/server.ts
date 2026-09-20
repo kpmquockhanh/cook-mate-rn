@@ -20,7 +20,15 @@ export async function buildServer(): Promise<FastifyInstance> {
 
   // The web build is a cross-origin caller, so this is load-bearing, not
   // boilerplate. Lock the origin down in production via API_CORS_ORIGIN.
-  await app.register(cors, { origin: env.apiCorsOrigin });
+  //
+  // `methods` is spelled out because @fastify/cors 11 defaults it to
+  // GET,HEAD,POST: leave it off and the preflight for the favourite routes
+  // answers without PUT/DELETE, so the browser blocks the real request and the
+  // app only sees an opaque "NetworkError".
+  await app.register(cors, {
+    origin: env.apiCorsOrigin,
+    methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  });
 
   // These must come BEFORE the routes are registered. `await app.register()`
   // boots the plugin straight away, and the child context captures whichever

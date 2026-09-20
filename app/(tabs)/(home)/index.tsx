@@ -55,6 +55,9 @@ export default function App() {
   // The home bar is only an entry point: tapping it hands off to the recipe
   // list, focused, which owns the keyboard and the results.
   const openSearch = () => router.push({ pathname: '/all-recipes', params: { focus: '1' } });
+  // The filter button lands on the same screen with its sheet already open, so
+  // the facets live in one place instead of two that have to agree.
+  const openFilters = () => router.push({ pathname: '/all-recipes', params: { filter: '1' } });
 
   return (
     <>
@@ -65,7 +68,7 @@ export default function App() {
 
             {!!resume && <ResumeCard entry={resume} onDismiss={dismissResume} />}
 
-            <Search onPress={openSearch} />
+            <Search onPress={openSearch} onFilterPress={openFilters} />
 
             <FacetChips meal={heroMeal} />
 

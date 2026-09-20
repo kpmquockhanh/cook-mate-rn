@@ -133,7 +133,7 @@ export default function Shopping() {
         </View>
         <View style={styles.itemDetails}>
           <Text style={[styles.itemName, item.checked && styles.checkedItemName]}>{item.name}</Text>
-          {item.quantity && <Text style={styles.itemQuantity}>{item.quantity}</Text>}
+          {item.quantity ? <Text style={styles.itemQuantity}>{item.quantity}</Text> : null}
         </View>
       </TouchableOpacity>
       {showDeleteButton && (

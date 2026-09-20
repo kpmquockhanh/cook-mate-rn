@@ -16,6 +16,10 @@ type SearchProps = {
   placeholder?: string;
   /** Layout of the wrapper, so callers can drop the default spacing. */
   containerClassName?: string;
+  /** Opens the filter sheet. Without it the filter button is not rendered. */
+  onFilterPress?: () => void;
+  /** How many facets are applied, for the badge on the filter button. */
+  filterCount?: number;
 };
 
 // Shared between both modes so the button and the real input stay pixel
@@ -30,6 +34,8 @@ export default function Search({
   autoFocus = false,
   placeholder,
   containerClassName = 'mt-6 px-4',
+  onFilterPress,
+  filterCount = 0,
 }: SearchProps) {
   const { t } = useTranslation();
   // Defaulted here rather than in the signature so the fallback follows the
@@ -41,11 +47,25 @@ export default function Search({
   const [search, setSearch] = useState(initialValue);
   const [focused, setFocused] = useState(false);
 
-  const FilterButton = (
-    <TouchableOpacity className="items-center justify-center rounded-2xl bg-gray-100 px-4">
-      <Ionicons name="options-outline" size={20} color="#9CA3AF" />
+  // Hidden rather than inert when no handler is given: a button that does
+  // nothing reads as a broken feature.
+  const FilterButton = onFilterPress ? (
+    <TouchableOpacity
+      activeOpacity={0.7}
+      onPress={onFilterPress}
+      accessibilityRole="button"
+      accessibilityLabel={t('filter.open')}
+      className={`items-center justify-center rounded-2xl px-4 ${
+        filterCount > 0 ? 'bg-[#ff6b6b]' : 'bg-gray-100'
+      }`}>
+      <Ionicons name="options-outline" size={20} color={filterCount > 0 ? '#FFF' : '#9CA3AF'} />
+      {filterCount > 0 && (
+        <View className="absolute right-1 top-1 h-4 min-w-4 items-center justify-center rounded-full bg-white px-1">
+          <Text className="text-[10px] font-bold text-[#ff6b6b]">{filterCount}</Text>
+        </View>
+      )}
     </TouchableOpacity>
-  );
+  ) : null;
 
   if (onPress) {
     return (

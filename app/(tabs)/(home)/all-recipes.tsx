@@ -14,11 +14,12 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import RecipeCard from 'components/RecipeCard';
 import Search from 'components/Search';
+import FilterSheet from 'components/FilterSheet';
 import { useRecipes, RecipeListItem } from 'hooks/useRecipes';
 import { goBack } from 'lib/navigationRoutes';
 import { useTranslation } from '../../../lib/i18n';
-import { isEmptyFilter } from '../../../lib/recipeFacets';
-import { facetFilterFromParams } from '../../../lib/facetRoute';
+import { isEmptyFilter, type FacetFilter } from '../../../lib/recipeFacets';
+import { facetFilterFromParams, facetFilterToParamPatch } from '../../../lib/facetRoute';
 import { describeFilter } from '../../../lib/facetLabels';
 
 const ITEMS_PER_PAGE = 10;
@@ -33,6 +34,7 @@ export default function AllRecipes() {
   // whole list on every keystroke.
   const {
     focus,
+    filter: filterParam,
     meal,
     ingredient,
     diet,
@@ -43,6 +45,7 @@ export default function AllRecipes() {
     popular,
   } = useLocalSearchParams<{
     focus?: string;
+    filter?: string;
     meal?: string;
     ingredient?: string;
     diet?: string;
@@ -54,6 +57,9 @@ export default function AllRecipes() {
   }>();
   const [searchQuery, setSearchQuery] = useState('');
   const [refreshing, setRefreshing] = useState(false);
+  // `filter=1` opens the sheet straight away, which is how the home bar's
+  // filter button gets here - the route carries the intent, like `focus`.
+  const [filterOpen, setFilterOpen] = useState(filterParam === '1');
 
   const filter = useMemo(
     () =>
@@ -70,6 +76,9 @@ export default function AllRecipes() {
     [meal, ingredient, diet, difficulty, maxMinutes, handsOff, favorites, popular]
   );
   const filtered = !isEmptyFilter(filter);
+  // Drives the badge on the filter button: how many facets are narrowing the
+  // list, which is what the pill below spells out in words.
+  const activeFacetCount = describeFilter(filter).length;
 
   // useRecipes pages by offset and reloads the first page whenever `search`
   // changes, so this screen only tracks the query itself.
@@ -90,19 +99,20 @@ export default function AllRecipes() {
     ...filter,
   });
 
+  /**
+   * Replaces the whole filter. The route is the single source of truth for it,
+   * so what the sheet applies is also what a deep link or a back gesture
+   * restores; the typed query is untouched, because narrowing is not a reset.
+   */
+  const applyFilter = useCallback(
+    (next: FacetFilter) => {
+      router.setParams(facetFilterToParamPatch(next) as never);
+    },
+    [router]
+  );
+
   /** Drops the facets but keeps whatever the user has typed. */
-  const clearFilter = useCallback(() => {
-    router.setParams({
-      meal: undefined,
-      ingredient: undefined,
-      diet: undefined,
-      difficulty: undefined,
-      maxMinutes: undefined,
-      handsOff: undefined,
-      favorites: undefined,
-      popular: undefined,
-    } as never);
-  }, [router]);
+  const clearFilter = useCallback(() => applyFilter({}), [applyFilter]);
 
   const handleSearch = useCallback((search: string) => {
     setSearchQuery(search);
@@ -168,7 +178,13 @@ export default function AllRecipes() {
 
         {/* px-5 lines the bar up with the cards below it; the wrapper used to
             add its own padding on top of the bar's. */}
-        <Search onSearch={handleSearch} autoFocus={focus === '1'} containerClassName="px-5" />
+        <Search
+          onSearch={handleSearch}
+          autoFocus={focus === '1'}
+          containerClassName="px-5"
+          onFilterPress={() => setFilterOpen(true)}
+          filterCount={activeFacetCount}
+        />
 
         {filtered && (
           <View style={styles.filterRow}>
@@ -189,7 +205,7 @@ export default function AllRecipes() {
           </View>
         )}
 
-        {error && (
+        {!!error && (
           <View style={styles.errorContainer}>
             <Text style={styles.errorText}>{error}</Text>
             <TouchableOpacity style={styles.retryButton} onPress={() => refetch()}>
@@ -221,6 +237,16 @@ export default function AllRecipes() {
           maxToRenderPerBatch={5}
           windowSize={10}
         />
+        {filterOpen && (
+          <FilterSheet
+            value={filter}
+            onClose={() => setFilterOpen(false)}
+            onApply={(next) => {
+              applyFilter(next);
+              setFilterOpen(false);
+            }}
+          />
+        )}
       </Container>
       <StatusBar style="auto" />
     </>

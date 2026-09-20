@@ -29,6 +29,16 @@ function client(): OpenAI {
  */
 const MAX_ATTEMPTS = 3;
 
+/** What a caller gets when it does not size the ceiling itself. */
+const DEFAULT_MAX_TOKENS = 8_000;
+
+/**
+ * The endpoint's ceiling for one completion. Checked against the live API
+ * rather than taken from the docs, which still describe the 8K limit the
+ * older chat models had.
+ */
+const MAX_OUTPUT_TOKENS = 64_000;
+
 // Rendering a schema to JSON Schema is pure and the set of schemas is tiny and
 // long-lived, so it is computed once per schema rather than once per call.
 const schemaJson = new WeakMap<object, string>();
@@ -52,12 +62,13 @@ export const deepseekProvider: LlmProvider = {
 
   async complete<T>(request: ProviderRequest<T>): Promise<ProviderResponse<T>> {
     let lastError: Error | null = null;
+    const maxTokens = Math.min(request.maxTokens ?? DEFAULT_MAX_TOKENS, MAX_OUTPUT_TOKENS);
 
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       try {
         const response = await client().chat.completions.create({
           model: request.model,
-          max_tokens: 8000,
+          max_tokens: maxTokens,
           // Deterministic-ish: this is an extraction task, not a creative one.
           temperature: 0,
           response_format: { type: 'json_object' },
@@ -70,7 +81,10 @@ export const deepseekProvider: LlmProvider = {
         const choice = response.choices[0];
         if (choice?.finish_reason === 'length') {
           // Not retryable: a longer recipe will truncate again on every attempt.
-          throw new Error('response truncated at max_tokens - input too long for one call');
+          throw new Error(
+            `response truncated at max_tokens (${maxTokens}) - this provider cannot return ` +
+              `more than ${MAX_OUTPUT_TOKENS} tokens in one call`,
+          );
         }
 
         const raw = choice?.message?.content?.trim();
@@ -90,7 +104,8 @@ export const deepseekProvider: LlmProvider = {
 
         if (response.usage) {
           log.debug(
-            `${request.model}: ${response.usage.prompt_tokens} in / ${response.usage.completion_tokens} out (attempt ${attempt})`,
+            `${request.model}: ${response.usage.prompt_tokens} in / ${response.usage.completion_tokens} out ` +
+              `(ceiling ${maxTokens}, attempt ${attempt})`,
           );
         }
         return { payload: parsed.data, model: request.model };

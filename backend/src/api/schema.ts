@@ -33,6 +33,30 @@ export const DIETS = ['vegetarian', 'vegan', 'pescatarian', 'gluten_free'] as co
 export const DIFFICULTIES = ['easy', 'medium', 'hard'] as const;
 
 /**
+ * The languages recipe *content* can come back in - the same list as
+ * lib/i18n/languages.ts, which is what the client sends.
+ *
+ * 'en' is not a translation: recipes are stored in the language they were
+ * scraped in, which is English on every source, so 'en' means "the base rows"
+ * and matches no overlay. Asking for a locale with no translation is not an
+ * error either; see queries/recipes.ts, which coalesces to the base row per
+ * field. That is why this `catch`es rather than 400s - a list that refuses to
+ * load is worse than one in the wrong language.
+ */
+export const LOCALES = ['en', 'vi'] as const;
+export type Locale = (typeof LOCALES)[number];
+export const DEFAULT_LOCALE: Locale = 'en';
+
+/** Accepts 'vi' and 'vi-VN' alike; anything unknown falls back to the default. */
+export const LocaleParam = z
+  .string()
+  .optional()
+  .transform((value): Locale => {
+    const base = (value ?? '').toLowerCase().split(/[-_]/)[0] ?? '';
+    return (LOCALES as readonly string[]).includes(base) ? (base as Locale) : DEFAULT_LOCALE;
+  });
+
+/**
  * "Hands-off": long on the clock, short on work. Both halves matter - a
  * 10-minute recipe is not hands-off, it is just quick - so the pair is one flag
  * rather than two thresholds the client has to agree with the server about.
@@ -43,6 +67,13 @@ export const HANDS_OFF_MIN_TOTAL_SECONDS = 60 * 60;
 export const ListQuery = z.object({
   search: z.string().trim().min(1).optional(),
   category: z.string().trim().min(1).optional(),
+
+  /**
+   * What language to render the recipe text in. Affects the text returned and
+   * what `search` matches against - never which rows exist, so an untranslated
+   * corpus lists identically in every locale.
+   */
+  locale: LocaleParam,
 
   // Facets, all ANDed. Each one is a column migration 0012 added and
   // publish/facets.ts fills, not something derived from the title at read time.
@@ -86,6 +117,11 @@ export const ListQuery = z.object({
 });
 
 export type ListQuery = z.infer<typeof ListQuery>;
+
+/** The only query string the detail route reads. */
+export const DetailQuery = z.object({ locale: LocaleParam });
+
+export type DetailQuery = z.infer<typeof DetailQuery>;
 
 export const IdParam = z.object({
   // bigserial: big enough to exceed Number.MAX_SAFE_INTEGER in theory, but the

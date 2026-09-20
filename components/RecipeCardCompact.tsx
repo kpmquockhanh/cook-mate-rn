@@ -5,6 +5,7 @@ import RecipeThumbnail from './RecipeThumbnail';
 import { facetsOf } from '../lib/recipeFacets';
 import { DIFFICULTY_LABEL } from '../lib/facetLabels';
 import { useTranslation } from '../lib/i18n';
+import { formatDuration } from '../lib/duration';
 
 /**
  * The card a horizontal rail is made of: a picture, a title, and the one fact
@@ -63,7 +64,7 @@ export default function RecipeCardCompact({ recipe }: { recipe: any }) {
       {/* One line, and it never wraps: the time is the point, the difficulty is
           context, and a two-line meta row would undo the compactness above. */}
       <Text className="mt-0.5 text-[11px] text-gray-400" numberOfLines={1}>
-        {recipe.time ?? recipe.cooking_time}
+        {formatDuration(recipe.totalMinutes, t) ?? recipe.time ?? recipe.cooking_time}
         {!!facets.difficulty && ` · ${t(DIFFICULTY_LABEL[facets.difficulty])}`}
       </Text>
     </TouchableOpacity>

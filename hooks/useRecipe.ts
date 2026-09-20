@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 // apiFetch attaches the caller's Supabase access token; the API 401s without it.
 import { ApiError, apiFetch } from '../lib/api';
+import { useLanguage } from '../lib/i18n';
 import { t } from '../lib/i18n/translate';
 
 export interface RecipeDetail {
@@ -9,6 +10,8 @@ export interface RecipeDetail {
   thumbnail: string;
   images?: Image[]; // Array of additional images
   cookingTime: string;
+  /** Shared by every locale, and what `cookingTime` is formatted from. */
+  totalMinutes?: number;
   servings: number;
   rating: number;
   /** AI-generated 0-10 quality score from enrichment, distinct from `rating`. */
@@ -19,6 +22,13 @@ export interface RecipeDetail {
   reviews: Review[];
   instructions: Instruction[];
   notes: Note[];
+  /**
+   * The language the text above actually came back in, which is not always the
+   * one asked for: a recipe with no current translation is served in the
+   * language it was scraped in. Lets a screen say so rather than imply
+   * otherwise.
+   */
+  locale: string;
   // Allow additional fields without forcing any
   [key: string]: unknown;
 }
@@ -80,10 +90,13 @@ function mapDbRowToRecipeDetail(row: any): RecipeDetail {
       image_path: image.image_path ?? image.image ?? image.image_url ?? '',
     })) : [],
     cookingTime: row.cooking_time ?? row.cookingTime ?? row.time ?? '30m',
+    totalMinutes:
+      typeof row.total_time_seconds === 'number' ? Math.round(row.total_time_seconds / 60) : undefined,
     servings: row.servings ?? 4,
     rating: typeof row.rating === 'number' ? row.rating : 0,
     aiScore: typeof row.ai_score === 'number' ? row.ai_score : undefined,
     reviewCount: row.review_count ?? row.reviewCount ?? 0,
+    locale: typeof row.locale === 'string' ? row.locale : 'en',
     isFavorite: row.is_favorite ?? row.isFavorite ?? false,
     ingredients: Array.isArray(row.ingredients) ? row.ingredients.map((ing: any, index: number) => ({
       id: String(ing.id ?? index),
@@ -115,6 +128,9 @@ function mapDbRowToRecipeDetail(row: any): RecipeDetail {
 
 export function useRecipe(options: UseRecipeOptions): UseRecipeResult {
   const { id } = options;
+  // The server does the localizing, so a language change is a refetch - it is
+  // in fetchRecipe's dependencies below for exactly that reason.
+  const locale = useLanguage();
   
   const [data, setData] = useState<RecipeDetail | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
@@ -140,7 +156,7 @@ export function useRecipe(options: UseRecipeOptions): UseRecipeResult {
     try {
       let recipeData: unknown;
       try {
-        recipeData = await apiFetch(`/recipes/${id}`, { method: 'GET' });
+        recipeData = await apiFetch(`/recipes/${id}?locale=${locale}`, { method: 'GET' });
       } catch (err) {
         // Keep the copy the screen already shows for a missing recipe; every
         // other failure (including a 401) keeps apiFetch's own message.
@@ -168,14 +184,14 @@ export function useRecipe(options: UseRecipeOptions): UseRecipeResult {
         setLoading(false);
       }
     }
-  }, [id]);
+  }, [id, locale]);
 
   useEffect(() => {
-    // Fetch recipe when id changes
+    // Fetch recipe when the id or the reader's language changes
     if (id) {
       fetchRecipe();
     }
-  }, [id]);
+  }, [id, locale]);
 
   return {
     data,

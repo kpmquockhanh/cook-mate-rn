@@ -8,6 +8,14 @@ export interface ProviderRequest<T = unknown> {
   /** The stronger tier. Providers may spend more effort/tokens on it. */
   escalate: boolean;
   /**
+   * The output ceiling for this one call, in tokens. Optional because most
+   * tasks restate a paragraph or two and the provider default covers them;
+   * translation sizes it from the recipe, because the only way a caller finds
+   * out the ceiling was too low is a truncated response it has to throw away.
+   * Providers clamp it to what their model actually allows.
+   */
+  maxTokens?: number;
+  /**
    * The shape the response must satisfy. Passed in rather than fixed, because
    * the pipeline now asks a model for two different things - enrichment of a
    * parsed recipe, and extraction of a recipe from a page nothing else could

@@ -1,4 +1,5 @@
 import type { RecipeDetail } from '../hooks/useRecipe';
+import { formatDuration } from './duration';
 
 /**
  * The app publishes the live cooking state to the voice agent as a participant
@@ -41,7 +42,9 @@ export function buildCookingState(
   return {
     title: recipe.title,
     servings: recipe.servings,
-    cookingTime: recipe.cookingTime,
+    // Spoken aloud by the agent, so it follows the screen's language rather
+    // than the scraper's.
+    cookingTime: formatDuration(recipe.totalMinutes) ?? recipe.cookingTime,
     currentStep: currentStep + 1,
     totalSteps: instructions.length,
     currentStepText: instructions[currentStep]?.instruction_text || '',

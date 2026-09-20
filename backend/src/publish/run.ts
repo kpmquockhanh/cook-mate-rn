@@ -8,6 +8,7 @@ import type { StagingRow } from '../types.js';
 import { deriveFacets, type CanonicalFact } from './facets.js';
 import { MAPPING } from './mapping.js';
 import { preflight, printPreflight } from './preflight.js';
+import { translateAll } from '../translate/run.js';
 
 const log = logger('publish');
 
@@ -53,6 +54,38 @@ export async function countPendingPublish(): Promise<{ approved: number; stale: 
      where enriched is not null`,
   );
   return rows[0] ?? { approved: 0, stale: 0 };
+}
+
+/**
+ * Publish, then translate what was just published.
+ *
+ * Stage 5 already reads what stage 4 writes, so the dependency arrow between
+ * these two modules only follows the one the data has always had. Keeping the
+ * chain here rather than in each caller means the CLI and the console cannot
+ * drift into publishing without translating.
+ *
+ * Translation failures do NOT fail the publish. A published recipe with no
+ * overlay is served in the language it was scraped in, which is the same thing
+ * the app shows for every recipe today; an exception here would instead leave
+ * rows marked `published` after the command reported failure.
+ */
+export async function publishAndTranslate(
+  limit: number,
+  options: { republish?: boolean; translate?: boolean } = {},
+): Promise<number> {
+  const published = await publishAll(limit, options.republish ?? false);
+
+  if (options.translate === false) return published;
+  if (published === 0) return published;
+
+  try {
+    // No limit of its own: whatever publish just wrote is what needs
+    // translating, and the staleness gate finds exactly those rows.
+    await translateAll(limit);
+  } catch (error) {
+    log.error('publish succeeded, translation did not', String(error));
+  }
+  return published;
 }
 
 export async function publishAll(limit: number, republish = false): Promise<number> {

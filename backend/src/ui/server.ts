@@ -24,7 +24,8 @@ import { logger } from '../log.js';
 import { countPendingImages, mirrorImages } from '../images/run.js';
 import { countPendingParse, parseAll } from '../parse/run.js';
 import { preflight } from '../publish/preflight.js';
-import { countPendingPublish, publishAll } from '../publish/run.js';
+import { countPendingPublish, publishAndTranslate } from '../publish/run.js';
+import { translateAll, translationBacklog } from '../translate/run.js';
 
 const log = logger('console');
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -181,7 +182,21 @@ const STAGES: Record<Exclude<JobKind, 'discover' | 'pipeline'>, StageRunner> = {
   images: (limit, flags) => mirrorImages(limit, { force: flags.force ?? false }),
   enrich: (limit, flags) => enrichAll(limit, { escalate: flags.escalate ?? false }),
   gate: (limit) => gateAll(limit),
-  publish: (limit, flags) => publishAll(limit, flags.republish ?? false),
+  // Publishes and then translates, so the console cannot put a recipe in
+  // front of users in a language they did not pick.
+  // Publish already chains into this, so running it here is for the cases a
+  // publish cannot reach: a TRANSLATION_VERSION bump, a new locale, or a
+  // chained run that failed after its publish succeeded.
+  translate: (limit, flags) =>
+    translateAll(limit, {
+      force: flags.force ?? false,
+      escalate: flags.escalate ?? false,
+    }),
+  publish: (limit, flags) =>
+    publishAndTranslate(limit, {
+      republish: flags.republish ?? false,
+      translate: flags.translate ?? true,
+    }),
 };
 
 // ---------------------------------------------------------------------------
@@ -196,7 +211,8 @@ async function handleApi(
 
   // --- overview ------------------------------------------------------------
   if (route === 'GET /api/overview') {
-    const [staging, queue, sources, unmatched, extractable, parsable, mirrorable, publishable] =
+    const [staging, queue, sources, unmatched, extractable, parsable, mirrorable, publishable,
+           translatable] =
       await Promise.all([
       query(
         `select status, count(*)::int as count, round(avg(quality_score))::int as avg_score
@@ -228,6 +244,7 @@ async function handleApi(
       countPendingParse(),
       countPendingImages(),
       countPendingPublish(),
+      translationBacklog(),
     ]);
     return {
       staging,
@@ -238,10 +255,11 @@ async function handleApi(
       parsable,
       mirrorable,
       publishable,
+      translatable,
       running: Object.fromEntries(
         ([
           'discover', 'crawl', 'extract', 'parse', 'images', 'enrich', 'gate', 'publish',
-          'pipeline',
+          'translate', 'pipeline',
         ] as JobKind[]).map(
           (kind) => [kind, runningJob(kind)?.id ?? null],
         ),
@@ -362,9 +380,10 @@ async function handleApi(
         for (const [name, run] of [
           ['crawl', STAGES.crawl],
           ['parse', STAGES.parse],
-          ['images', STAGES.images],
           ['enrich', STAGES.enrich],
           ['gate', STAGES.gate],
+          // Last: only rows the gate approved are worth fetching photos for.
+          ['images', STAGES.images],
         ] as const) {
           if (ctx.signal.aborted) {
             ctx.log.warn(`cancelled before ${name}`);

@@ -95,6 +95,19 @@ const vi: Record<TranslationKey, Phrase> = {
   'facet.pescatarian': 'Chay có cá',
   'facet.glutenFree': 'Không gluten',
 
+  // --- Filter sheet ---------------------------------------------------------
+  'filter.open': 'Bộ lọc',
+  'filter.title': 'Bộ lọc',
+  'filter.close': 'Đóng bộ lọc',
+  'filter.time': 'Thời gian',
+  'filter.meal': 'Bữa ăn',
+  'filter.ingredient': 'Nguyên liệu chính',
+  'filter.diet': 'Chế độ ăn',
+  'filter.difficulty': 'Độ khó',
+  'filter.more': 'Khác',
+  'filter.clearAll': 'Xoá hết',
+  'filter.apply': 'Xem công thức',
+
   // --- Search ---------------------------------------------------------------
   'search.placeholder': 'Tìm công thức...',
   'search.loadingMore': 'Đang tải thêm công thức...',

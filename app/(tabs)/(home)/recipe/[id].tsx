@@ -36,6 +36,7 @@ import Reanimated, {
 } from 'react-native-reanimated';
 import { WEB_MOBILE_MAX_WIDTH } from '../../../_layout';
 import { useTranslation } from '../../../../lib/i18n';
+import { formatDuration } from '../../../../lib/duration';
 import { TAB_BAR_OVERLAP } from '../../../../lib/navigationRoutes';
 
 /**
@@ -466,7 +467,7 @@ export default function RecipeDetailPage() {
           <View className="flex-1 items-center">
             <Ionicons name="time-outline" size={22} color="#ff6b6b" />
             <Text className="mt-1 text-sm font-semibold text-gray-800">
-              {recipeData.cookingTime}
+              {formatDuration(recipeData.totalMinutes, t) ?? recipeData.cookingTime}
             </Text>
             <Text className="text-xs text-gray-400">{t('recipe.totalTime')}</Text>
           </View>

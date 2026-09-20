@@ -3,6 +3,8 @@ import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import RecipeThumbnail from './RecipeThumbnail';
 import { useFavorites } from '../lib/FavoritesContext';
+import { useTranslation } from '../lib/i18n';
+import { formatDuration } from '../lib/duration';
 
 /**
  * The full-width row: used wherever a list says "here is everything", as
@@ -21,6 +23,7 @@ export default function RecipeCard({
   showHeart: boolean;
 }) {
   const router = useRouter();
+  const { t } = useTranslation();
   const { isFavorite, toggle } = useFavorites();
   // The row carries the server's answer; the context carries anything the user
   // has changed since, so the same recipe's heart agrees with itself wherever
@@ -77,7 +80,9 @@ export default function RecipeCard({
 
         <View className="mt-1.5 flex-row items-center">
           <Ionicons name="time-outline" size={13} color="#9CA3AF" />
-          <Text className="ml-1 text-xs text-gray-500">{recipe.time}</Text>
+          <Text className="ml-1 text-xs text-gray-500">
+            {formatDuration(recipe.totalMinutes, t) ?? recipe.time}
+          </Text>
           {!!recipe.difficulty && (
             <>
               <MaterialIcons

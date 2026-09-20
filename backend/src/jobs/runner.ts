@@ -12,6 +12,7 @@ export type JobKind =
   | 'enrich'
   | 'gate'
   | 'publish'
+  | 'translate'
   | 'pipeline';
 
 export type JobStatus = 'running' | 'done' | 'failed' | 'cancelled';

@@ -6,7 +6,7 @@ import {
   recordEvent,
   removeFavorite,
 } from '../queries/recipes.js';
-import { EventBody, IdParam, ListQuery } from '../schema.js';
+import { DetailQuery, EventBody, IdParam, ListQuery } from '../schema.js';
 
 /** Every route here is authenticated (see api/auth.ts), so this is never null. */
 function userId(request: FastifyRequest): string {
@@ -28,7 +28,11 @@ export async function recipeRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(404).send({ error: 'Recipe not found' });
     }
 
-    const recipe = await getRecipe(parsed.data.id, userId(request));
+    // `locale` never 400s - LocaleParam falls back to 'en' - so an unknown
+    // language gets the recipe in English rather than an error screen.
+    const { locale } = DetailQuery.parse(request.query);
+
+    const recipe = await getRecipe(parsed.data.id, userId(request), locale);
     if (!recipe) {
       return reply.code(404).send({ error: 'Recipe not found' });
     }

@@ -290,7 +290,8 @@ const STAGE_INFO = [
   { key: 'images', title: 'Images', desc: 'Copy each recipe\'s photos into our own public bucket. Sources without allow_image_use are skipped.' },
   { key: 'enrich', title: 'Enrich', desc: 'Step timers and step-to-ingredient links, from the model.' },
   { key: 'gate', title: 'Gate', desc: 'Score, de-duplicate, route to approved or review.' },
-  { key: 'publish', title: 'Publish', desc: 'Approved rows into the app tables the API serves.' },
+  { key: 'publish', title: 'Publish', desc: 'Approved rows into the app tables the API serves, then translates them.' },
+  { key: 'translate', title: 'Translate', desc: 'Published recipes in the app\'s other languages. Publish runs this for you; use it for a re-translation or a new locale.' },
 ];
 
 function stageBacklog(key) {
@@ -309,6 +310,13 @@ function stageBacklog(key) {
       // stale rows. `stale` needs the republish flag, which the hint says.
       const { approved = 0, stale = 0 } = state.overview?.publishable ?? {};
       return { n: approved + stale, unit: stale > 0 ? 'to publish' : 'approved' };
+    }
+    case 'translate': {
+      const rows = state.overview?.translatable ?? [];
+      const outstanding = rows.reduce((sum, r) => sum + (r.outstanding ?? 0), 0);
+      // Summed across locales, not de-duplicated by recipe: two languages
+      // owing the same recipe is two model calls, not one.
+      return { n: outstanding, unit: rows.length > 1 ? 'to translate' : 'untranslated' };
     }
     default: return { n: 0, unit: '' };
   }
@@ -331,11 +339,22 @@ function renderPipeline() {
       : stage.key === 'images' ? flag('force', 're-mirror')
       : stage.key === 'enrich' ? flag('escalate', 'escalate')
       : stage.key === 'publish' ? flag('republish', 'republish')
+      : stage.key === 'translate' ? flag('force', 're-translate') + flag('escalate', 'escalate')
       : '';
     // The one case where the button alone does not clear the backlog.
     const stalePublish = stage.key === 'publish' ? (state.overview?.publishable?.stale ?? 0) : 0;
+    // A stale translation is not a backlog item like the others: the recipe is
+    // live and being served in the wrong language until this stage runs.
+    const staleTranslate = stage.key === 'translate'
+      ? (state.overview?.translatable ?? [])
+          .filter((r) => (r.stale ?? 0) > 0)
+          .map((r) => `${r.stale} ${r.locale}`)
+          .join(', ')
+      : '';
     const hint = stalePublish > 0
       ? `<div class="hint">${stalePublish} already live but out of date - tick republish</div>`
+      : staleTranslate
+      ? `<div class="hint">${staleTranslate} live in the wrong language - recipe changed since</div>`
       : '';
     return `
       <div class="stage ${busy ? 'busy' : ''}">

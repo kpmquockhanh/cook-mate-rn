@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 // REST API via EXPO_PUBLIC_API_URL. apiFetch attaches the caller's Supabase
 // access token - the API rejects an unauthenticated read with a 401.
 import { apiFetch } from '../lib/api';
+import { useLanguage } from '../lib/i18n';
+import type { Language } from '../lib/i18n/languages';
 import { t } from '../lib/i18n/translate';
 
 export interface RecipeListItem {
@@ -119,13 +121,20 @@ interface Query {
   orderBy: string;
   order: 'asc' | 'desc';
   limit: number;
+  /**
+   * What language to render recipe text in. Not a caller option: it comes from
+   * SettingsContext, and it is part of the query because changing the language
+   * has to refetch - the server picks the wording, not the client.
+   */
+  locale: Language;
 }
 
 // Absent facets are '' / 0 rather than undefined so the serialized key below
 // is stable: JSON.stringify drops undefined values, and two option objects
 // that differ only in which keys are present would otherwise share a key.
-function normalize(options?: UseRecipesOptions): Query {
+function normalize(options: UseRecipesOptions | undefined, locale: Language): Query {
   return {
+    locale,
     search: options?.search?.trim() ?? '',
     category: options?.category?.trim() ?? '',
     meal: options?.meal ?? '',
@@ -146,6 +155,9 @@ function normalize(options?: UseRecipesOptions): Query {
 
 function buildPath(query: Query, offset: number): string {
   const params = new URLSearchParams();
+  // Always sent, including 'en': the API reads it as "the base rows", and
+  // being explicit means a default change on either side cannot go unnoticed.
+  params.set('locale', query.locale);
   if (query.search) params.set('search', query.search);
   if (query.category) params.set('category', query.category);
   if (query.meal) params.set('meal', query.meal);
@@ -183,12 +195,15 @@ export function useRecipes<TItem = RecipeListItem>(
   const [loadingMore, setLoadingMore] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState<boolean>(true);
+  // Recipe text is localized by the server, so a language change is a new
+  // query rather than a re-render: it flows into `key` below and refetches.
+  const language = useLanguage();
 
   // Callers pass options straight from render state (a search box, a category
   // chip), so the object identity changes every render. Everything below keys
   // off this serialized form, which changes only when a value actually does -
   // and a request is rebuilt from it, so the two can never drift apart.
-  const key = JSON.stringify(normalize(options));
+  const key = JSON.stringify(normalize(options, language));
 
   const mountedRef = useRef<boolean>(true);
   // Rows the server has already handed over for this query - the offset of the

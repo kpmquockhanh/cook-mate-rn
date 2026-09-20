@@ -39,7 +39,7 @@ export const DIET_LABEL: Record<Diet, TranslationKey> = {
   gluten_free: 'facet.glutenFree',
 };
 
-const MAX_MINUTES_LABEL: Record<number, TranslationKey> = {
+export const MAX_MINUTES_LABEL: Record<number, TranslationKey> = {
   15: 'facet.under15',
   30: 'facet.under30',
   60: 'facet.under60',

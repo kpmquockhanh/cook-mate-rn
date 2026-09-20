@@ -14,7 +14,8 @@ import { mirrorImages } from './images/run.js';
 import { logger } from './log.js';
 import { migrate } from './migrate.js';
 import { parseAll } from './parse/run.js';
-import { preflight, printPreflight, publishAll } from './publish/run.js';
+import { preflight, printPreflight, publishAndTranslate } from './publish/run.js';
+import { translateAll, translationCoverage } from './translate/run.js';
 import { ensureImageBucket, publicBaseUrl } from './storage/images.js';
 import { ensureBucket, describeStore } from './storage/pages.js';
 import { backfillRawPages } from './storage/rawPages.js';
@@ -64,23 +65,36 @@ CookMate recipe pipeline
           [--robots-check]     Re-check queued URLs against robots.txt; reports only
   extract [--limit N]          Tier D: read recipes off pages tiers A/B/C missed (LLM)
           [--dry-run]          Show what it would extract, write nothing
-  images  [--limit N] [--force] [--check]
-                               Mirror recipe photos into our own storage bucket
   parse   [--limit N] [--force]  Stage 1: raw_pages -> staging (deterministic)
   enrich  [--limit N]          Stage 2: durations, step<->ingredient links (LLM)
           [--include-published]  also re-enrich live rows (after an ENRICHMENT_VERSION bump)
           [--escalate]         Re-run the review queue on the stronger model
   gate    [--limit N]          Stage 3: score, dedupe, route to review
-  publish [--limit N]          Stage 4: write into the app tables
+  images  [--limit N] [--force] [--check]
+                               Stage 3b: mirror approved recipes' photos into
+                               our own storage bucket. After the gate: a
+                               rejected recipe's photos help nobody.
+  publish [--limit N]          Stage 4: write into the app tables, then
+                               translate what was written (stage 5)
+          [--no-translate]     Publish only; leave the translation for later
           [--check]            Introspect the schema without writing anything
           [--republish]        Also rewrite rows already published
+  translate [--limit N]        Stage 5: published recipes in another language (LLM).
+                               Runs automatically after "publish"; this command
+                               is for backfills and re-translation.
+          [--locale vi]        One locale (default: TRANSLATE_LOCALES)
+          [--force]            Re-translate rows that are already current
+          [--escalate]         Use the stronger model
+          [--dry-run]          Translate and print, write nothing
+          [--coverage]         How much of the corpus each language covers
   storage check                Verify page storage is reachable; create the bucket
   storage backfill [--batch N] Move raw_pages.html into object storage
   review                       Alias for \`ui\`
   runs    [--kind k] [--limit N] Per-run counters, oldest last, for comparison
           [--log ID]           Print the log that run stored, oldest first
   unmatched [--limit N]        Ingredients the dictionary is missing
-  pipeline [--limit N]         crawl -> extract -> parse -> enrich -> gate (stops before publish)
+  pipeline [--limit N]         crawl -> extract -> parse -> enrich -> gate -> images
+                               (stops before publish)
 `;
 
 async function main() {
@@ -259,13 +273,49 @@ async function main() {
         );
       break;
 
+    // Runs AFTER publish, not before: the overlay is keyed on published child
+    // rows' sort_order and gated on the published content_fingerprint, so a
+    // recipe only becomes translatable once it is live. See translate/run.ts.
+    case 'translate': {
+      if (flag(args, 'coverage')) {
+        const rows = await translationCoverage();
+        if (rows.length === 0) {
+          log.info('nothing translated yet');
+          break;
+        }
+        for (const row of rows) {
+          log.info(
+            `${row.locale}: ${row.current}/${row.total} current, ${row.stale} stale`,
+          );
+        }
+        break;
+      }
+
+      const locale = text(args, 'locale');
+      await withJobLock('translate', () =>
+        translateAll(limit, {
+          locales: locale ? [locale] : undefined,
+          force: flag(args, 'force'),
+          escalate: flag(args, 'escalate'),
+          dryRun: flag(args, 'dry-run'),
+        }),
+      );
+      break;
+    }
+
     case 'gate':
       await withJobLock('gate', () => gateAll(limit));
       break;
 
     case 'publish':
       if (flag(args, 'check')) printPreflight(await preflight());
-      else await withJobLock('publish', () => publishAll(limit, flag(args, 'republish')));
+      else
+        await withJobLock('publish', () =>
+          publishAndTranslate(limit, {
+            republish: flag(args, 'republish'),
+            translate: !flag(args, 'no-translate'),
+          }),
+        );
       break;
 
     // Same server either way: `review` is what this command used to be called,
@@ -306,9 +356,11 @@ async function main() {
         await crawl(limit);
         await extractProseAll(limit);
         await parseAll(limit);
-        await mirrorImages(limit);
         await enrichAll(limit);
         await gateAll(limit);
+        // After the gate, not before it: a rejected recipe's photos are
+        // bandwidth and storage spent on something nobody will ever see.
+        await mirrorImages(limit);
       });
       log.info('pipeline done - run `npm run ui` to triage, then `npm run publish`');
       break;

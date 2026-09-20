@@ -1,5 +1,5 @@
 import { query } from '../db.js';
-import { MAPPING } from './mapping.js';
+import { MAPPING, TRANSLATION_MAPPING } from './mapping.js';
 
 interface ColumnRow {
   table_schema: string;
@@ -33,7 +33,12 @@ export async function preflight(): Promise<PreflightReport> {
   const missingTables: string[] = [];
   const missingColumns: string[] = [];
 
-  for (const group of Object.values(MAPPING)) {
+  // The translation overlay is checked alongside the publisher's own tables:
+  // the API reads it on every request, so a missing migration 0015 is worth
+  // the same loud answer as a missing recipes column.
+  const groups = [...Object.values(MAPPING), ...Object.values(TRANSLATION_MAPPING)];
+
+  for (const group of groups) {
     if (!tables.has(group.table)) {
       missingTables.push(group.table);
       continue;
@@ -62,6 +67,7 @@ export function printPreflight(report: PreflightReport): void {
     console.log('  Missing tables:');
     for (const table of report.missingTables) console.log(`    - ${table}`);
     console.log('\n  Either create them, or correct the names in src/publish/mapping.ts.');
+    console.log('  The recipe_*_translations tables come from migration 0015.');
   }
   if (report.missingColumns.length > 0) {
     console.log('\n  Missing columns:');

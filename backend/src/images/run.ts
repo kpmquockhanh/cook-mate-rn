@@ -40,6 +40,7 @@ export async function countPendingImages(): Promise<number> {
        from crawler.recipe_staging st
        join crawler.sources s on s.id = st.source_id
       where s.allow_image_use = true
+        and st.status in ('approved', 'published')
         and (jsonb_array_length(st.image_urls) > 0 or st.image_url is not null)
         and st.images_mirrored_at is null`,
   );
@@ -58,6 +59,7 @@ export async function mirrorImages(
        from crawler.recipe_staging st
        join crawler.sources s on s.id = st.source_id
       where s.allow_image_use = true
+        and st.status in ('approved', 'published')
         and (jsonb_array_length(st.image_urls) > 0 or st.image_url is not null)
         and ($2 or st.images_mirrored_at is null)
       order by st.id
