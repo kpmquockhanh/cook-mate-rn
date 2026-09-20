@@ -1,11 +1,11 @@
 import React from 'react';
-import { View, Text } from 'react-native';
+import { View, Text, type ColorValue } from 'react-native';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useTimer } from '../../lib/TimerContext';
 
 interface TimerTabIconProps {
   size: number;
-  color: string;
+  color: ColorValue;
   focused: boolean;
 }
 

@@ -2,15 +2,13 @@ import { AppState, Platform } from 'react-native'
 import 'react-native-url-polyfill/auto'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { createClient, processLock } from '@supabase/supabase-js'
+import { env } from './env'
 
-const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL!
 // Publishable key (sb_publishable_...), not the legacy anon JWT. supabase-js
 // passes it through verbatim as the `apikey` header, so no version bump is
 // needed; unlike the anon key it can be rotated without invalidating every
 // user's session. It is public - RLS is what actually guards the data.
-const supabasePublishableKey = process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY!
-
-export const supabase = createClient(supabaseUrl, supabasePublishableKey, {
+export const supabase = createClient(env.supabaseUrl, env.supabasePublishableKey, {
   auth: {
     ...(Platform.OS !== "web" ? { storage: AsyncStorage } : {}),
     autoRefreshToken: true,

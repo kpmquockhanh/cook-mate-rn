@@ -22,26 +22,51 @@ Voice‑first, hands‑free cooking companion that orchestrates multi‑timers a
 ## Installation
 
 ### Prerequisites
-- Node.js 18+ (LTS recommended)
-- Package manager: npm, yarn, or pnpm
+- Node.js 22 (pinned in `.nvmrc`; `nvm use` picks it up). This is the major the
+  backend/agent Docker images build on - keep `.nvmrc` and the Dockerfiles in step.
+- npm (the repo has three `package-lock.json` files; CI uses `npm ci`)
 - Expo CLI: `npm i -g expo`
 - macOS: Xcode + Command Line Tools, CocoaPods (`sudo gem install cocoapods`)
 - Android: Android Studio with SDKs and an emulator; set `ANDROID_HOME`
 - Optional (macOS): Watchman `brew install watchman`
 
-### 1) Clone and install
+### 1) Clone and set up
 ```bash
 git clone https://github.com/your-org/cook-mate-rn.git
 cd cook-mate-rn
-npm install # or yarn / pnpm i
+nvm use        # Node 22, per .nvmrc
+npm run setup
 ```
 
+`npm run setup` installs dependencies for all three packages (the app, `backend/`
+and `agent/`), creates any missing `.env` from its `.env.example`, and prints
+which values are still placeholders. It is safe to re-run - an existing `.env`
+is never overwritten.
+
 ### 2) Environment
-Create your env file(s):
+The repo has three independent env sets, each with a tracked template:
+
+| File | Used by | Notes |
+| --- | --- | --- |
+| `.env` | the Expo app | `EXPO_PUBLIC_*` only, and every value is **public** - it is inlined into the JS bundle at build time |
+| `backend/.env` | API, crawler pipeline, console | server secrets: `DATABASE_URL`, provider keys, service-role key |
+| `agent/.env` | LiveKit voice agent | `LIVEKIT_*` server secrets |
+
+`npm run setup` copies all three. To check them at any time:
+
 ```bash
-cp .env.example .env
-# Fill in SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, etc.
+npm run env:check
 ```
+
+That reports drift in both directions: variables read somewhere in code but
+documented in no `.env.example` (the failure mode that silently breaks a
+teammate's clone), and variables in your `.env` that the template never
+mentions. It runs in CI too, where it checks the code-vs-template half only.
+
+The app validates its own environment at startup in `lib/env.ts`, so a missing
+`EXPO_PUBLIC_*` value fails immediately, naming every variable that is missing,
+rather than surfacing later as an opaque error. Expo inlines these at build
+time - after editing `.env`, restart the dev server.
 
 ### 3) Run the app
 ```bash
@@ -66,10 +91,19 @@ npm run ios
 npm run android
 npm run web
 
-# Lint & type-check
-npm run lint
-npm run typecheck
+# Checks (CI runs all of these)
+npm run typecheck    # tsc --noEmit
+npm run env:check    # .env / .env.example / code drift, all three packages
+npm run lint         # eslint + prettier
+
+# Backend has its own
+cd backend && npm run typecheck && npm test
 ```
+
+Note: `npm run lint` currently reports pre-existing errors (mostly
+`react-hooks` rules, plus the Deno `npm:` imports in `supabase/functions/` that
+the Node resolver cannot see). CI runs it non-blocking until that backlog is
+cleared - see `.github/workflows/ci.yml`.
 
 ---
 

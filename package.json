@@ -6,9 +6,15 @@
     "ios": "expo run:ios",
     "start": "expo start",
     "prebuild": "expo prebuild",
+    "setup": "node scripts/setup.mjs",
+    "env:check": "node scripts/check-env.mjs",
+    "typecheck": "tsc --noEmit",
     "lint": "eslint \"**/*.{js,jsx,ts,tsx}\" && prettier -c \"**/*.{js,jsx,ts,tsx,json}\"",
     "format": "eslint \"**/*.{js,jsx,ts,tsx}\" --fix && prettier \"**/*.{js,jsx,ts,tsx,json}\" --write",
     "web": "expo start --web"
+  },
+  "engines": {
+    "node": ">=22"
   },
   "dependencies": {
     "@config-plugins/react-native-webrtc": "^12.0.0",

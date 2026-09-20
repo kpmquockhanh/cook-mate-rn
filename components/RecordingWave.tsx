@@ -1,14 +1,5 @@
-import React, { useEffect, useMemo, useRef , useCallback, useState } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
 import { Animated, Easing, StyleProp, View, ViewStyle } from 'react-native';
-
-// ----------------------------
-// Optional: Audio level hook (Expo AV)
-// ----------------------------
-// Usage:
-// const { level, recording, start, stop } = useRecorderLevel();
-// <RecordingWave level={level} active={!!recording} />
-
-// import { Audio } from 'expo-av';
 
 /**
  * RecordingWave
@@ -17,8 +8,6 @@ import { Animated, Easing, StyleProp, View, ViewStyle } from 'react-native';
  * Two modes:
  * 1) Self-animated (default): pretty looping bars.
  * 2) Audio-driven: pass `level` (0..1) to reflect input loudness.
- *
- * Optional: pair with the `useRecorderLevel` hook below (Expo AV) to drive it from mic input.
  */
 export type RecordingWaveProps = {
   /** Number of bars */
@@ -144,99 +133,12 @@ export const RecordingWave: React.FC<RecordingWaveProps> = ({
   );
 };
 
-export function useRecorderLevel(updateMs: number = 120) {
-  const [recording, setRecording] = useState<Audio.Recording | null>(null);
-  const [level, setLevel] = useState(0);
-
-  const start = useCallback(async () => {
-    // Ask permissions & configure
-    const perm = await Audio.requestPermissionsAsync();
-    if (!perm.granted) throw new Error('Microphone permission denied');
-
-    await Audio.setAudioModeAsync({
-      allowsRecordingIOS: true,
-      playsInSilentModeIOS: true,
-      staysActiveInBackground: false,
-    });
-
-    const rec = new Audio.Recording();
-    // Enable metering (iOS supports metering; Android support depends on OS/device)
-    await rec.prepareToRecordAsync({
-      android: {
-        extension: '.m4a',
-        outputFormat: Audio.AndroidOutputFormat.MPEG_4,
-        audioEncoder: Audio.AndroidAudioEncoder.AAC,
-        sampleRate: 44100,
-        numberOfChannels: 1,
-        bitRate: 128000,
-      },
-      ios: {
-        extension: '.m4a',
-        outputFormat: Audio.IOSOutputFormat.MPEG4AAC,
-        audioQuality: Audio.IOSAudioQuality.Medium,
-        sampleRate: 44100,
-        numberOfChannels: 1,
-        bitRate: 128000,
-        meteringEnabled: true,
-      },
-      isMeteringEnabled: true as any, // for type compat (Expo SDKs vary)
-    } as any);
-
-    await rec.startAsync();
-    setRecording(rec);
-
-    // Poll metering
-    const id = setInterval(async () => {
-      try {
-        const status = await rec.getStatusAsync();
-        // `metering` is in dBFS (~ -160..0). Map to 0..1.
-        const db = (status as any).metering ?? (status as any).meteringEnabled ? (status as any).metering : -160;
-        const norm = dbToLinear(db);
-        setLevel(norm);
-      } catch {}
-    }, updateMs);
-
-    // Stop polling when unmounted or stopped
-    (rec as any)._levelInterval = id;
-  }, [updateMs]);
-
-  const stop = useCallback(async () => {
-    if (!recording) return;
-    try {
-      await recording.stopAndUnloadAsync();
-    } catch {}
-    const id = (recording as any)._levelInterval;
-    if (id) clearInterval(id);
-    setRecording(null);
-    setLevel(0);
-  }, [recording]);
-
-  return { level, recording, start, stop } as const;
-}
-
-function dbToLinear(db: number) {
-  // Clamp and map -80..0 dB to 0..1 (ignore very low noise floor)
-  const clamped = Math.max(-80, Math.min(0, db));
-  const lin = Math.pow(10, clamped / 20); // convert dBFS to linear amplitude
-  const norm = (lin - Math.pow(10, -80 / 20)) / (1 - Math.pow(10, -80 / 20));
-  return Math.max(0, Math.min(1, norm));
-}
-
 // ----------------------------
 // Example usage (in a screen/component)
 // ----------------------------
-// import React from 'react';
-// import { View, Button } from 'react-native';
-// import { RecordingWave, useRecorderLevel } from './RecordingWave';
+// <RecordingWave width={280} height={56} color="#10B981" level={level} active={isRecording} />
 //
-// export default function RecordScreen() {
-//   const { level, recording, start, stop } = useRecorderLevel();
-//
-//   return (
-//     <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 }}>
-//       <RecordingWave width={280} height={56} color="#10B981" level={level} active={!!recording} />
-//       <View style={{ height: 16 }} />
-//       <Button title={recording ? 'Stop' : 'Start'} onPress={recording ? stop : start} />
-//     </View>
-//   );
-// }
+// `level` is 0..1. Nothing in the app drives it yet: the Expo AV hook that used
+// to live here was removed because expo-av is not a dependency (expo-audio is
+// its replacement in SDK 54+), so it could only throw. Leave `level` unset for
+// the self-animated mode.

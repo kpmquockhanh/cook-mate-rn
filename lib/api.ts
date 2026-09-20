@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { env } from './env';
 import { t } from './i18n/translate';
 
 /**
@@ -23,12 +24,6 @@ export class ApiError extends Error {
   }
 }
 
-function baseUrl(): string {
-  const base = process.env.EXPO_PUBLIC_API_URL;
-  if (!base) throw new Error('Missing EXPO_PUBLIC_API_URL');
-  return base.replace(/\/$/, '');
-}
-
 /**
  * getSession() refreshes on its own when the stored token is past expiry, so
  * this is normally the only token call needed. It reads from AsyncStorage, so
@@ -43,7 +38,7 @@ async function request(path: string, init: RequestInit, token: string | null): P
   const headers = new Headers(init.headers);
   if (token) headers.set('Authorization', `Bearer ${token}`);
 
-  return fetch(`${baseUrl()}${path.startsWith('/') ? path : `/${path}`}`, { ...init, headers });
+  return fetch(`${env.apiUrl}${path.startsWith('/') ? path : `/${path}`}`, { ...init, headers });
 }
 
 /**

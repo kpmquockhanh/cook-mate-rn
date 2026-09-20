@@ -1,0 +1,79 @@
+# The repo is three npm packages that are checked independently, so they get
+# three jobs rather than one long script - a backend test failure should not
+# hide an app type error.
+#
+# Node comes from .nvmrc, which is pinned to the same major the Dockerfiles
+# build on. Keep those two in step.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  app:
+    name: App (Expo)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      # Runs with no .env present, which is the point: it checks that every
+      # variable read in code is documented in a .env.example, for all three
+      # packages at once. The .env-vs-.env.example half is skipped in CI.
+      - name: Env drift
+        run: npm run env:check
+      # NOT blocking yet. There are 24 pre-existing lint errors (mostly
+      # react-hooks/refs and set-state-in-effect, plus the Deno `npm:` imports
+      # in supabase/functions that the Node resolver cannot see). Drop this
+      # line once that backlog is cleared, so new violations start failing.
+      - name: Lint
+        run: npm run lint
+        continue-on-error: true
+
+  backend:
+    name: Backend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+        working-directory: backend
+      - name: Typecheck
+        run: npm run typecheck
+        working-directory: backend
+      # The suite is deliberately runnable with no Supabase project and no
+      # DATABASE_URL: raw-page storage falls back to the filesystem store.
+      - name: Test
+        run: npm test
+        working-directory: backend
+
+  agent:
+    name: Voice agent
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: agent/package-lock.json
+      - run: npm ci
+        working-directory: agent
+      - name: Typecheck
+        run: npm run typecheck
+        working-directory: agent

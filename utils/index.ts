@@ -1,3 +1,5 @@
+import { env } from '../lib/env';
+
 export const getImageUrl = (image: string) => {
   if (!image) {
     return '';
@@ -11,10 +13,5 @@ export const getImageUrl = (image: string) => {
     return image;
   }
 
-  const apiBase = process.env.EXPO_PUBLIC_STORAGE_URL;
-  if (!apiBase) {
-    throw new Error('Missing EXPO_PUBLIC_STORAGE_URL');
-  }
-
-  return `${apiBase.replace(/\/$/, '')}/${image.replace(/^\//, '')}`;
+  return `${env.storageUrl}/${image.replace(/^\//, '')}`;
 };

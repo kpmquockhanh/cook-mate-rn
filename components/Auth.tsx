@@ -14,13 +14,14 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../lib/supabase';
+import { env } from '../lib/env';
 import { useTranslation } from '../lib/i18n';
 
 // Dev-only convenience: start the sign-in form filled in with a throwaway test
 // account so signing in during development is one tap. Release builds always
 // start empty, whatever is in .env.
-const devEmail = __DEV__ ? (process.env.EXPO_PUBLIC_DEV_EMAIL ?? '') : '';
-const devPassword = __DEV__ ? (process.env.EXPO_PUBLIC_DEV_PASSWORD ?? '') : '';
+const devEmail = __DEV__ ? env.devEmail : '';
+const devPassword = __DEV__ ? env.devPassword : '';
 
 export default function Auth() {
   const { t } = useTranslation();

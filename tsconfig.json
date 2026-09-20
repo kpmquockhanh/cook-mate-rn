@@ -4,9 +4,16 @@
     "strict": true,
     "jsx": "react-jsx",
 
-    "baseUrl": ".",
+    // Root-relative imports (`components/RecipeCard`, `hooks/useRecipes`).
+    // This used to be a bare `baseUrl: "."`, which TypeScript 6 deprecates and
+    // 7 removes. Explicit `paths` with no baseUrl is the replacement, and
+    // Expo's Metro resolver reads it the same way - both the bundler and tsc
+    // must agree here or an import resolves at runtime but not in the editor.
     "paths": {
-      "~/*": ["src/*"]
+      "components/*": ["./components/*"],
+      "hooks/*": ["./hooks/*"],
+      "lib/*": ["./lib/*"],
+      "utils/*": ["./utils/*"]
     }
   },
   "exclude": ["agent", "supabase", "backend"]
