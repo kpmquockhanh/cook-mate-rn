@@ -39,8 +39,17 @@ class AudioCapture(private val onChunk: (ShortArray) -> Unit, private val onFail
       record.release()
       throw IllegalStateException("The microphone could not be opened")
     }
+    try {
+      record.startRecording()
+    } catch (e: Exception) {
+      record.release()
+      throw IllegalStateException("The microphone could not be started", e)
+    }
+    if (record.recordingState != AudioRecord.RECORDSTATE_RECORDING) {
+      record.release()
+      throw IllegalStateException("The microphone could not be started")
+    }
     running = true
-    record.startRecording()
     thread = Thread({
       val chunk = ShortArray(CHUNK_SIZE)
       try {

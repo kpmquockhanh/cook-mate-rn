@@ -26,6 +26,7 @@ final class AudioCapture {
 
   func start() throws {
     if isRunning { return }
+    pending.removeAll()
     let input = engine.inputNode
     let inputFormat = input.outputFormat(forBus: 0)
     guard inputFormat.sampleRate > 0, inputFormat.channelCount > 0 else { throw CaptureError.noInput }
@@ -34,7 +35,16 @@ final class AudioCapture {
       self?.convert(buffer)
     }
     engine.prepare()
-    try engine.start()
+    do {
+      try engine.start()
+    } catch {
+      // Remove the tap and drop the converter so a later start() can install a
+      // fresh tap; a second installTap on top of this one crashes with an
+      // Objective-C NSException that Swift cannot catch.
+      input.removeTap(onBus: 0)
+      converter = nil
+      throw error
+    }
     isRunning = true
   }
 
@@ -42,7 +52,6 @@ final class AudioCapture {
     guard isRunning else { return }
     engine.inputNode.removeTap(onBus: 0)
     engine.stop()
-    pending.removeAll()
     isRunning = false
   }
 
