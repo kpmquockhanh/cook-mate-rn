@@ -301,7 +301,14 @@ const en = {
   'settings.voiceAssistant': 'Voice assistant',
   'settings.voiceAssistantDescription': 'Talk to CookMate hands-free during a recipe',
   'settings.voiceAutoStart': 'Connect automatically',
-  'settings.voiceAutoStartDescription': 'Start listening as soon as cooking mode opens',
+  'settings.voiceAutoStartDescription': 'Wait for "Hey CookMate" as soon as cooking mode opens',
+  'settings.voiceWakeWindow': 'After "Hey CookMate"',
+  'settings.voiceWakeWindowQuickDescription':
+    'Listens for your request, then about 8 seconds more for a follow-up',
+  'settings.voiceWakeWindowConversationDescription':
+    'Keeps listening until 30 seconds of quiet, or until you say thanks',
+  'settings.voiceWakeWindowQuick': 'Quick',
+  'settings.voiceWakeWindowConversation': 'Conversation',
   'settings.spokenSteps': 'Read steps aloud',
   'settings.spokenStepsDescription': 'Speaks each step as you reach it',
   'settings.speechRate': 'Speaking speed',
