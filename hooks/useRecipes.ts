@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 // REST API via EXPO_PUBLIC_API_URL. apiFetch attaches the caller's Supabase
 // access token - the API rejects an unauthenticated read with a 401.
-import { apiFetch } from '../lib/api';
+import { apiFetch, isConnectionError } from '../lib/api';
+import { onReconnect } from '../lib/connectivity';
 import { useLanguage } from '../lib/i18n';
 import type { Language } from '../lib/i18n/languages';
 import { t } from '../lib/i18n/translate';
@@ -261,8 +262,10 @@ export function useRecipes<TItem = RecipeListItem>(
       if (!mountedRef.current || requestId !== requestIdRef.current) return;
       setError(err?.message ?? t('error.recipesFetch'));
       // Leave the rows already on screen alone on a failed loadMore - dropping
-      // them would turn a dead page into an empty list.
-      if (!append) {
+      // them would turn a dead page into an empty list. Likewise on a lost
+      // connection: stale rows beat a blank screen, and the reconnect effect
+      // below reloads them once the API is back.
+      if (!append && !isConnectionError(err)) {
         setData([]);
         setHasMore(false);
       }
@@ -287,6 +290,14 @@ export function useRecipes<TItem = RecipeListItem>(
   const refetch = useCallback(async (): Promise<void> => {
     await load(false);
   }, [load]);
+
+  // A request that failed while the API was unreachable is retried as soon as
+  // it comes back. Only a failed one: a list that loaded fine is not worth a
+  // burst of requests from every mounted rail the moment the network returns.
+  useEffect(() => {
+    if (!error) return;
+    return onReconnect(() => void load(false));
+  }, [error, load]);
 
   const loadMore = useCallback((): void => {
     if (inFlightRef.current || !hasMore) return;

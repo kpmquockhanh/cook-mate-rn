@@ -10,6 +10,7 @@ import Auth from '../components/Auth';
 import '../global.css';
 import { TimerProvider } from '../lib/TimerContext';
 import RootStack from '../components/RootStack';
+import ConnectionBanner from '../components/ConnectionBanner';
 
 // Suppresses the in-app warning/error pill and its full-screen overlay.
 // Errors and warnings still print to the Metro/console output.
@@ -60,11 +61,13 @@ function RootLayoutNav() {
     );
   }
 
-  if (!user) {
-    return <Auth />;
-  }
-
-  return <RootStack />;
+  return (
+    <View style={{ flex: 1 }}>
+      {user ? <RootStack /> : <Auth />}
+      {/* Last, so it floats over whichever screen is up. */}
+      <ConnectionBanner />
+    </View>
+  );
 }
 
 export default function RootLayout() {

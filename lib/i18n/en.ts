@@ -404,6 +404,16 @@ const en = {
   'error.recipeFetch': 'Failed to fetch recipe',
   'error.recipesFetch': 'Failed to fetch recipes',
   'error.anonymousReviewer': 'Anonymous',
+  'error.connection': 'Could not connect. Check your internet connection.',
+  'error.timeout': 'The server took too long to respond',
+  'error.serverDown': 'The server is temporarily unavailable',
+
+  // Connection banner, shown over every screen while the API is unreachable.
+  'connection.offline': 'You are offline',
+  'connection.serverDown': 'Cannot reach CookMate right now',
+  'connection.retryingIn': 'Retrying in {seconds}s',
+  'connection.checking': 'Reconnecting…',
+  'connection.restored': 'Back online',
 
   // --- Placeholder screens --------------------------------------------------
   'record.placeholder': 'This is from record page',

@@ -376,6 +376,15 @@ const vi: Record<TranslationKey, Phrase> = {
   'error.recipeFetch': 'Không tải được công thức',
   'error.recipesFetch': 'Không tải được danh sách công thức',
   'error.anonymousReviewer': 'Ẩn danh',
+  'error.connection': 'Không thể kết nối. Hãy kiểm tra kết nối mạng.',
+  'error.timeout': 'Máy chủ phản hồi quá lâu',
+  'error.serverDown': 'Máy chủ tạm thời không khả dụng',
+
+  'connection.offline': 'Bạn đang ngoại tuyến',
+  'connection.serverDown': 'Hiện không thể kết nối tới CookMate',
+  'connection.retryingIn': 'Thử lại sau {seconds} giây',
+  'connection.checking': 'Đang kết nối lại…',
+  'connection.restored': 'Đã kết nối lại',
 
   // --- Placeholder screens --------------------------------------------------
   'record.placeholder': 'Đây là trang ghi âm',
