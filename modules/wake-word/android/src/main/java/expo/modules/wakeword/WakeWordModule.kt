@@ -7,7 +7,7 @@ import kotlin.math.sqrt
 class WakeWordModule : Module() {
   @Volatile private var threshold = 0.5f
   private var chunksSinceLevel = 0
-  private var capture: AudioCapture? = null
+  @Volatile private var capture: AudioCapture? = null
 
   override fun definition() = ModuleDefinition {
     Name("WakeWord")
@@ -17,13 +17,24 @@ class WakeWordModule : Module() {
     AsyncFunction("start") { threshold: Double ->
       this@WakeWordModule.threshold = threshold.toFloat()
       if (capture == null) {
-        capture = AudioCapture(
+        lateinit var created: AudioCapture
+        created = AudioCapture(
           onChunk = { handle(it) },
           onFailure = { message ->
-            capture = null
+            // Only clear the field if it still points at this instance: a
+            // late failure from a since-replaced capture must not null out
+            // a newer one.
+            if (capture === created) capture = null
             sendEvent("onError", mapOf("message" to message))
           }
-        ).also { it.start() }
+        )
+        try {
+          created.start()
+          capture = created
+        } catch (e: Exception) {
+          capture = null
+          throw e
+        }
       }
     }
 
