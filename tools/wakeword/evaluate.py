@@ -14,6 +14,7 @@ import numpy as np
 from openwakeword.model import Model
 
 CHUNK = 1280
+WARMUP_SAMPLES = 2 * 16000  # 2 s of silence, prepended before scoring
 
 
 def load(path: Path) -> np.ndarray:
@@ -22,6 +23,24 @@ def load(path: Path) -> np.ndarray:
             f"{path}: must be 16 kHz mono 16-bit (ffmpeg -i in -ar 16000 -ac 1 out.wav)"
         )
         return np.frombuffer(f.readframes(f.getnframes()), dtype=np.int16)
+
+
+def pad(pcm: np.ndarray) -> np.ndarray:
+    """Prepend 2 s of int16 silence so the streaming pipelines are fully warmed
+    up before the phrase starts. openWakeWord returns 0.0 for its first ~5
+    predictions after `model.reset()` (~400 ms), and the native pipelines
+    (Tasks 7/8) return no score at all until 16 real embeddings exist (~1.3 s).
+    A tightly trimmed "one phrase per file" clip would otherwise score that
+    warm-up window instead of the phrase, and native/Python would disagree."""
+    return np.concatenate([np.zeros(WARMUP_SAMPLES, dtype=np.int16), pcm])
+
+
+def write_wav(path: Path, pcm: np.ndarray) -> None:
+    with wave.open(str(path), "wb") as f:
+        f.setnchannels(1)
+        f.setsampwidth(2)
+        f.setframerate(16000)
+        f.writeframes(pcm.tobytes())
 
 
 def scores(model: Model, pcm: np.ndarray) -> list[float]:
@@ -35,14 +54,14 @@ def scores(model: Model, pcm: np.ndarray) -> list[float]:
 def detection_rate(model: Model, folder: Path, threshold: float) -> float:
     clips = sorted(folder.glob("*.wav"))
     assert clips, f"no clips in {folder}"
-    hits = sum(max(scores(model, load(c))) >= threshold for c in clips)
+    hits = sum(max(scores(model, pad(load(c)))) >= threshold for c in clips)
     return hits / len(clips)
 
 
 def false_wakes_per_hour(model: Model, folder: Path, threshold: float, cooldown_chunks: int = 19) -> float:
     total_chunks, wakes = 0, 0
     for clip in sorted(folder.glob("*.wav")):
-        s = scores(model, load(clip))
+        s = scores(model, pad(load(clip)))
         total_chunks += len(s)
         i = 0
         while i < len(s):
@@ -89,15 +108,14 @@ def main() -> None:
 
     positive = sorted((ev / "positive_1m").glob("*.wav"))[0]
     negative = sorted((ev / "negative").glob("*.wav"))[0]
-    neg_pcm = load(negative)[: 16000 * 20]  # 20 s is plenty for parity
-    shutil.copy(positive, export / "test-audio" / "positive.wav")
-    with wave.open(str(export / "test-audio" / "negative.wav"), "wb") as f:
-        f.setnchannels(1)
-        f.setsampwidth(2)
-        f.setframerate(16000)
-        f.writeframes(neg_pcm.tobytes())
+    positive_pcm = pad(load(positive))
+    neg_pcm = pad(load(negative)[: 16000 * 20])  # 20 s is plenty for parity
+    # Both exported clips are the padded audio golden.json was scored on, so
+    # the native parity check (Tasks 7/8) sees the same warm-up Python did.
+    write_wav(export / "test-audio" / "positive.wav", positive_pcm)
+    write_wav(export / "test-audio" / "negative.wav", neg_pcm)
     golden = {
-        "positive": max(scores(model, load(positive))),
+        "positive": max(scores(model, positive_pcm)),
         "negative": max(scores(model, neg_pcm)),
     }
     (export / "test-audio" / "golden.json").write_text(json.dumps(golden, indent=2) + "\n")

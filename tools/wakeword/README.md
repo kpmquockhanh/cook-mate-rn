@@ -30,8 +30,14 @@ Convert anything to the right format with `ffmpeg -i in.m4a -ar 16000 -ac 1 out.
     python work/openWakeWord/openwakeword/train.py --training_config hey_cookmate.yml --train_model
     python evaluate.py --threshold 0.5
 
-`evaluate.py` prints the three numbers and PASS or FAIL. It also copies the
-models, a positive and a negative test clip, and `golden.json` into
+`evaluate.py` prints the three numbers and PASS or FAIL. Every clip is scored
+with 2 s of silence prepended, so the streaming pipeline is fully warmed up
+before the phrase starts (openWakeWord needs ~400 ms after a reset, the native
+pipelines in `modules/wake-word` need ~1.3 s); without this a tightly trimmed
+"one phrase per file" clip would score the warm-up window instead of the
+phrase. `evaluate.py` also copies the models, a positive and a negative test
+clip (both padded the same way, so native and Python parity checks score the
+same audio `golden.json` was scored on), and `golden.json` into
 `modules/wake-word/`, whatever the result. Commit only after a PASS.
 
 ## If it fails
