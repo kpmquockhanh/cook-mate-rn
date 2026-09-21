@@ -9,6 +9,7 @@
     "setup": "node scripts/setup.mjs",
     "env:check": "node scripts/check-env.mjs",
     "typecheck": "tsc --noEmit",
+    "test": "tsx --test lib/*.test.ts lib/**/*.test.ts",
     "lint": "eslint \"**/*.{js,jsx,ts,tsx}\" && prettier -c \"**/*.{js,jsx,ts,tsx,json}\"",
     "format": "eslint \"**/*.{js,jsx,ts,tsx}\" --fix && prettier \"**/*.{js,jsx,ts,tsx,json}\" --write",
     "web": "expo start --web"
@@ -65,6 +66,7 @@
     "prettier": "^3.2.5",
     "prettier-plugin-tailwindcss": "^0.5.11",
     "tailwindcss": "^3.4.0",
+    "tsx": "^4.23.15",
     "typescript": "~6.0.3"
   },
   "main": "expo-router/entry",

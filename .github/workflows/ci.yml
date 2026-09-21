@@ -28,6 +28,8 @@ jobs:
       - run: npm ci
       - name: Typecheck
         run: npm run typecheck
+      - name: Unit tests
+        run: npm test
       # Runs with no .env present, which is the point: it checks that every
       # variable read in code is documented in a .env.example, for all three
       # packages at once. The .env-vs-.env.example half is skipped in CI.
