@@ -1,0 +1,11 @@
+openwakeword @ git+https://github.com/dscripka/openWakeWord@v0.6.0
+piper-tts==1.2.0
+datasets==2.19.1
+soundfile==0.12.1
+numpy<2
+scipy
+torch
+torchaudio
+onnxruntime
+pyyaml
+tqdm

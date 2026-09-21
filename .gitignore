@@ -93,3 +93,7 @@ supabase/.temp/
 ## Python caches
 __pycache__/
 *.pyc
+
+tools/wakeword/.venv/
+tools/wakeword/data/
+tools/wakeword/work/
