@@ -1,6 +1,6 @@
-# The repo is three npm packages that are checked independently, so they get
-# three jobs rather than one long script - a backend test failure should not
-# hide an app type error.
+# The backend and the voice agent are separate npm packages that are checked
+# independently, so they get their own jobs rather than one long script - a
+# backend test failure should not hide an agent type error.
 #
 # Node comes from .nvmrc, which is pinned to the same major the Dockerfiles
 # build on. Keep those two in step.
@@ -16,33 +16,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  app:
-    name: App (Expo)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version-file: .nvmrc
-          cache: npm
-      - run: npm ci
-      - name: Typecheck
-        run: npm run typecheck
-      - name: Unit tests
-        run: npm test
-      # Runs with no .env present, which is the point: it checks that every
-      # variable read in code is documented in a .env.example, for all three
-      # packages at once. The .env-vs-.env.example half is skipped in CI.
-      - name: Env drift
-        run: npm run env:check
-      # NOT blocking yet. There are 24 pre-existing lint errors (mostly
-      # react-hooks/refs and set-state-in-effect, plus the Deno `npm:` imports
-      # in supabase/functions that the Node resolver cannot see). Drop this
-      # line once that backlog is cleared, so new violations start failing.
-      - name: Lint
-        run: npm run lint
-        continue-on-error: true
-
   backend:
     name: Backend
     runs-on: ubuntu-latest
