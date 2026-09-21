@@ -76,9 +76,6 @@ coverage/
 ## .cursor/
 .cursor/
 
-## Bmad
-.bmad-core/
-
 ## Supabase CLI local state
 supabase/.temp/
 
@@ -86,3 +83,6 @@ supabase/.temp/
 ## Python caches
 __pycache__/
 *.pyc
+
+# Claude Code personal settings
+.claude/settings.local.json
