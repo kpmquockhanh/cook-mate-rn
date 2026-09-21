@@ -16,12 +16,12 @@ from piper import PiperVoice
 from scipy.signal import resample_poly
 
 SPELLINGS = [
-    "hây cúc mét",
-    "hê cúc mét",
+    "hây cúc mết",
+    "hê cúc mết",
     "hây cúc mây",
-    "hey cúc mét",
-    "hây, cúc mét",
-    "ê cúc mét",
+    "hey cúc mết",
+    "hây, cúc mết",
+    "ê cúc mết",
 ]
 
 
