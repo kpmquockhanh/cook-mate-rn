@@ -1,7 +1,7 @@
 # Wake word ("Hey CookMate") for the cooking voice assistant
 
 Date: 2026-09-21
-Status: Draft, awaiting review
+Status: Approved. Implementation plan: `docs/superpowers/plans/2026-09-21-wake-word.md`
 
 ## Problem
 
@@ -97,9 +97,11 @@ The two durations are constants in `lib/listeningWindow.ts`, not user settings.
    Copy is added to `lib/i18n/en.ts` and `lib/i18n/vi.ts`.
 6. **`lib/SettingsContext.tsx`**:
    - Add `voiceWakeWindow: 'quick' | 'conversation'` (default `'quick'`).
-   - `SETTINGS_SCHEMA_VERSION` → 2. `migrate` fills the default for v1 blobs, and
-     `sanitize` rejects unknown values.
-   - A control in `components/Settings/SettingsControls.tsx`, in both languages.
+   - No schema bump: the field is additive, and `sanitize` already fills missing
+     fields from the defaults, so a v1 blob reads as `'quick'`. `sanitize` rejects
+     unknown values. The schema moves to a pure `lib/settingsSchema.ts` so it can
+     be unit tested.
+   - A `SegmentedRow` in the Voice section of `app/(tabs)/settings.tsx`, in both languages.
 
 ### Agent (`agent/src/agent.ts`)
 
@@ -130,9 +132,10 @@ The two durations are constants in `lib/listeningWindow.ts`, not user settings.
    `waiting-for-wake-word`.
 5. Wake word while the agent is speaking → effects `interruptAgent`,
    `playOpenChime` (and `unmute` if idle). The window timer restarts.
-6. Cooking screen unmounts or the app goes to the background → detector stops, room
-   disconnects. On return to the foreground with the screen still mounted, the room
-   reconnects and the detector restarts.
+6. Cooking screen unmounts → detector stops, room disconnects. App goes to the
+   background → detector stops and the window closes (mute, no tone); the room
+   stays connected, as it does today. On return to the foreground the detector
+   restarts.
 
 The detector runs for the whole connected session, including while the window is open.
 
@@ -150,10 +153,10 @@ The detector runs for the whole connected session, including while the window is
 
 ## Testing
 
-- **Unit tests (new `jest-expo` setup, scoped to these modules):**
+- **Unit tests (`node:test` via `tsx --test`, the runner `backend/` already uses):**
   - `listeningWindow`: every transition and timeout in both modes, barge-in,
     `endRequested`, cooldown, `reset`.
-  - `SettingsContext` migrate/sanitize: v1 → v2 default, unknown value rejected.
+  - `settingsSchema` migrate/sanitize: v1 blob gets the default, unknown value rejected.
 - **Model evaluation (script, not CI):** on held-out clips, ≥ 90 % detection at
   1 m and ≥ 80 % at 3 m, across English- and Vietnamese-accented speakers. ≤ 1 false
   wake per hour on kitchen noise, TV, and English/Vietnamese chatter.
