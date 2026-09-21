@@ -280,8 +280,8 @@ const vi: Record<TranslationKey, Phrase> = {
   'settings.voiceAssistant': 'Trợ lý giọng nói',
   'settings.voiceAssistantDescription': 'Trò chuyện rảnh tay với CookMate khi đang nấu',
   'settings.voiceAutoStart': 'Tự động kết nối',
-  'settings.voiceAutoStartDescription': 'Chờ gọi "Hey CookMate" ngay khi vào chế độ nấu ăn',
-  'settings.voiceWakeWindow': 'Sau khi gọi "Hey CookMate"',
+  'settings.voiceAutoStartDescription': 'Chờ gọi “Hey CookMate” ngay khi vào chế độ nấu ăn',
+  'settings.voiceWakeWindow': 'Sau khi gọi “Hey CookMate”',
   'settings.voiceWakeWindowQuickDescription':
     'Nghe yêu cầu của bạn, rồi chờ thêm khoảng 8 giây nếu bạn muốn hỏi tiếp',
   'settings.voiceWakeWindowConversationDescription':

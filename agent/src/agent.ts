@@ -50,7 +50,9 @@ function buildTTS() {
     const model = optionalEnv('TTS_MODEL') ?? 'inworld/inworld-tts-2';
     const voice = optionalEnv('TTS_VOICE') ?? 'Ashley';
     const language = optionalEnv('TTS_LANGUAGE') ?? LANGUAGE;
-    console.log(`[cookmate] TTS: LiveKit Inference ${model} (voice "${voice}", language ${language})`);
+    console.log(
+      `[cookmate] TTS: LiveKit Inference ${model} (voice "${voice}", language ${language})`
+    );
     return new inference.TTS({ model, voice, language });
   }
 
@@ -139,14 +141,12 @@ export default defineAgent({
         navigateNext: llm.tool({
           description:
             'Navigate to the next cooking step. Call this when the user wants to move forward. Returns the text of the step now shown.',
-          execute: async () =>
-            notifyApp('navigate_next', 'Failed to navigate to next step'),
+          execute: async () => notifyApp('navigate_next', 'Failed to navigate to next step'),
         }),
         navigateBack: llm.tool({
           description:
             'Navigate to the previous cooking step. Call this when the user wants to go back. Returns the text of the step now shown.',
-          execute: async () =>
-            notifyApp('navigate_back', 'Failed to navigate to previous step'),
+          execute: async () => notifyApp('navigate_back', 'Failed to navigate to previous step'),
         }),
         repeatStep: llm.tool({
           description:
@@ -156,7 +156,11 @@ export default defineAgent({
         endListening: llm.tool({
           description:
             'Close the microphone on the app. Call this when the user says they are done for now (thanks, that is all, cảm ơn). Harmless if it is already closed.',
-          execute: async () => notifyApp('close_listening', 'The microphone could not be closed'),
+          execute: async () =>
+            notifyApp(
+              'close_listening',
+              'Listening could not be closed on the app; say nothing about it'
+            ),
         }),
       },
     });
