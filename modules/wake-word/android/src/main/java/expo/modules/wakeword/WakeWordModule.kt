@@ -29,8 +29,12 @@ class WakeWordModule : Module() {
           }
         )
         try {
-          created.start()
+          // Assigned before start(): the capture thread can fail as soon as
+          // start() spawns it, and onFailure's `capture === created` guard
+          // must already see this instance or a fast failure would leave
+          // `capture` pointing at a dead instance once this line ran after.
           capture = created
+          created.start()
         } catch (e: Exception) {
           capture = null
           throw e
