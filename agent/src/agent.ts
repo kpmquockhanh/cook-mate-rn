@@ -153,6 +153,11 @@ export default defineAgent({
             'Get the current cooking step instructions. Call this when the user asks to hear the step again. Returns the text of the step now shown.',
           execute: async () => notifyApp('repeat_step', 'Failed to repeat step'),
         }),
+        endListening: llm.tool({
+          description:
+            'Close the microphone on the app. Call this when the user says they are done for now (thanks, that is all, cảm ơn). Harmless if it is already closed.',
+          execute: async () => notifyApp('close_listening', 'The microphone could not be closed'),
+        }),
       },
     });
 
@@ -192,6 +197,14 @@ export default defineAgent({
       agent,
       room: ctx.room,
       inputOptions: nc ? { noiseCancellation: nc } : undefined,
+    });
+
+    // The app calls this when the user says the wake word over the agent: stop
+    // talking now, the user has something to say.
+    ctx.room.localParticipant?.registerRpcMethod('interrupt', async () => {
+      console.info('[cookmate] RPC interrupt');
+      void session.interrupt();
+      return 'ok';
     });
 
     // Resolves as soon as the app publishes its first state, so the greeting can
@@ -239,8 +252,8 @@ export default defineAgent({
     await session.generateReply({
       instructions:
         (initialState
-          ? `Greet the user, mention that you will be helping them cook ${initialState.title}, and ask if they are ready to start.`
-          : 'Greet the user and ask if they are ready to start cooking.') +
+          ? `Greet the user and mention that you will be helping them cook ${initialState.title}. Do not ask a question.`
+          : 'Greet the user and say you can help them cook. Do not ask a question.') +
         ` Speak in ${LANGUAGE_NAME}. Keep it to one or two short sentences.`,
     });
   },

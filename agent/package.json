@@ -7,6 +7,7 @@
     "dev": "tsx src/agent.ts dev",
     "start": "tsx src/agent.ts start",
     "token": "tsx src/generate-token.ts",
+    "test": "tsx --test src/*.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "engines": {

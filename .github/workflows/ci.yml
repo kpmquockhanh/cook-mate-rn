@@ -79,3 +79,6 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
         working-directory: agent
+      - name: Unit tests
+        run: npm test
+        working-directory: agent
