@@ -45,29 +45,23 @@ Thumbs.db
 *.orig.*
 
 ## Android
-android
-android/.gradle/
-android/captures/
-android/app/build/
-android/build/
+/android
+/android/.gradle/
+/android/captures/
+/android/app/build/
+/android/build/
 .gradle/
 *.keystore
 
 ## iOS
-ios
-ios/Pods/
-ios/build/
-ios/DerivedData/
+/ios
+/ios/Pods/
+/ios/build/
+/ios/DerivedData/
+Pods/
 *.xcuserdatad
 *.xcworkspace/xcuserdata/
 *.xcuserstate
-
-## Local Expo modules (modules/*/ios, modules/*/android) are hand-written
-## source, not the generated root ios/ and android/ the rules above target.
-!modules/*/android
-!modules/*/android/**
-!modules/*/ios
-!modules/*/ios/**
 
 ## Certificates and sensitive files
 *.jks
