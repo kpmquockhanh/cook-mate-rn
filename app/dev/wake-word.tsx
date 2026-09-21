@@ -1,7 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import { ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { Redirect, useLocalSearchParams } from 'expo-router';
-import { AudioSession, LiveKitRoom, useVoiceAssistant, registerGlobals } from '@livekit/react-native';
+import {
+  AudioSession,
+  LiveKitRoom,
+  useVoiceAssistant,
+  registerGlobals,
+} from '@livekit/react-native';
 import WakeWord from '../../modules/wake-word';
 import { useLiveKitToken } from '../../lib/livekitToken';
 
@@ -12,8 +17,17 @@ registerGlobals();
  *
  * The spike: run the module's capture and a LiveKit room at the same time and
  * watch both. The level bar is our capture; "agent" is LiveKit's view.
+ *
+ * The default export is a thin gate so that no hook below - in particular
+ * `useLiveKitToken`, which calls the `livekit-token` edge function - ever
+ * runs in a production build.
  */
 export default function WakeWordDevScreen() {
+  if (!__DEV__) return <Redirect href="/" />;
+  return <WakeWordDevHarness />;
+}
+
+function WakeWordDevHarness() {
   const { recipe } = useLocalSearchParams<{ recipe?: string }>();
   const { credentials } = useLiveKitToken(recipe ?? null);
   const [capturing, setCapturing] = useState(false);
@@ -36,8 +50,8 @@ export default function WakeWordDevScreen() {
     return () => subs.forEach((s) => s.remove());
   }, []);
 
-  if (!__DEV__) return <Redirect href="/" />;
-  if (!WakeWord) return <Text className="p-6">WakeWord native module is not linked in this build.</Text>;
+  if (!WakeWord)
+    return <Text className="p-6">WakeWord native module is not linked in this build.</Text>;
   // Narrowing on a module-level import doesn't carry into the closures below
   // (TS can't prove it stays non-null across a later call), so bind it here.
   const wakeWord = WakeWord;
@@ -76,7 +90,12 @@ export default function WakeWordDevScreen() {
         <View className="h-4 bg-orange-500" style={{ width: `${Math.min(100, rms * 400)}%` }} />
       </View>
       {connected && credentials && (
-        <LiveKitRoom serverUrl={credentials.serverUrl} token={credentials.token} connect audio video={false}>
+        <LiveKitRoom
+          serverUrl={credentials.serverUrl}
+          token={credentials.token}
+          connect
+          audio
+          video={false}>
           <AgentState />
         </LiveKitRoom>
       )}
