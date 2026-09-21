@@ -86,7 +86,10 @@ test('endRequested closes an open window with a tone, and is a no-op when idle',
   const closed = stepWindow(open, { type: 'endRequested', now: 10 }, 'conversation');
   assert.equal(closed.state.phase, 'idle');
   assert.deepEqual(closed.effects, ['mute', 'playCloseTone']);
-  assert.deepEqual(stepWindow(INITIAL_WINDOW, { type: 'endRequested', now: 0 }, 'quick').effects, []);
+  assert.deepEqual(
+    stepWindow(INITIAL_WINDOW, { type: 'endRequested', now: 0 }, 'quick').effects,
+    []
+  );
 });
 
 test('wake while the agent is speaking interrupts it', () => {
@@ -136,15 +139,24 @@ test('tap while the agent is speaking interrupts rather than closing', () => {
   assert.deepEqual(effects, ['unmute', 'playOpenChime', 'interruptAgent', 'playOpenChime']);
 });
 
-test('reset closes silently and clears everything', () => {
+test('reset closes silently, clears the window, but keeps the speaking flags', () => {
   const open = run([
     ['wake', 0],
     ['userSpeechStart', 10],
   ]).state;
   const step = stepWindow(open, { type: 'reset', now: 20 }, 'quick');
-  assert.deepEqual(step.state, INITIAL_WINDOW);
+  assert.deepEqual(step.state, { ...INITIAL_WINDOW, userSpeaking: true });
   assert.deepEqual(step.effects, ['mute']);
   assert.deepEqual(stepWindow(INITIAL_WINDOW, { type: 'reset', now: 0 }, 'quick').effects, []);
+});
+
+test('a wake after reset while the agent is speaking still interrupts it', () => {
+  const midSentence = run([['agentSpeechStart', 0]]).state;
+  const afterReset = stepWindow(midSentence, { type: 'reset', now: 10 }, 'quick').state;
+  assert.equal(afterReset.agentSpeaking, true);
+  const { state, effects } = stepWindow(afterReset, { type: 'wake', now: 20 }, 'quick');
+  assert.equal(state.phase, 'open');
+  assert.deepEqual(effects, ['interruptAgent', 'unmute', 'playOpenChime']);
 });
 
 test('speech while idle is tracked but schedules nothing', () => {

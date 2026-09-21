@@ -131,6 +131,17 @@ export function stepWindow(state: WindowState, event: WindowEvent, mode: WindowM
     case 'endRequested':
       return close(state, true);
     case 'reset':
-      return { state: INITIAL_WINDOW, effects: close(state, false).effects };
+      // Keep the speaking flags: they are observations of the room, not
+      // window state, and a mid-sentence reset (a detector-effect cleanup or
+      // onInterrupted) must not make the machine think the agent went quiet.
+      // The next wake still needs to see agentSpeaking so it can interrupt.
+      return {
+        state: {
+          ...INITIAL_WINDOW,
+          userSpeaking: state.userSpeaking,
+          agentSpeaking: state.agentSpeaking,
+        },
+        effects: close(state, false).effects,
+      };
   }
 }
