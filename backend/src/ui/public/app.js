@@ -60,6 +60,32 @@ const drawer = $('#drawer');
 const logEl = $('#log');
 let pollTimer = null;
 
+/**
+ * What the drawer is showing, kept across reloads: `{ jobId?, runId?, collapsed }`.
+ * Only a pointer - the lines come back from the server, which already holds
+ * them (a job's in memory, a run's in Postgres). Storage can be blocked, and
+ * the drawer then simply starts empty as it always did.
+ */
+const DRAWER_KEY = 'drawer';
+
+function loadDrawer() {
+  try {
+    return JSON.parse(localStorage.getItem(DRAWER_KEY)) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function saveDrawer(patch) {
+  try {
+    const next = patch === null ? null : { ...loadDrawer(), ...patch };
+    if (next) localStorage.setItem(DRAWER_KEY, JSON.stringify(next));
+    else localStorage.removeItem(DRAWER_KEY);
+  } catch {
+    // Nothing to do: the drawer works without it.
+  }
+}
+
 $('#drawer-bar').onclick = (event) => {
   if (event.target.closest('#job-cancel')) return;
   toggleDrawer();
@@ -70,6 +96,7 @@ function toggleDrawer(force) {
   drawer.classList.toggle('collapsed', collapsed);
   $('#drawer-toggle').textContent = collapsed ? 'Show log' : 'Hide log';
   if (!collapsed) logEl.scrollTop = logEl.scrollHeight;
+  saveDrawer({ collapsed });
 }
 
 $('#job-cancel').onclick = async () => {
@@ -83,6 +110,7 @@ function follow(job) {
   state.job = job;
   state.logCursor = 0;
   state.logKey = null;
+  saveDrawer({ jobId: job.id, runId: job.runId ?? null });
   logEl.textContent = '';
   drawer.hidden = false;
   toggleDrawer(false);
@@ -135,6 +163,8 @@ async function pollJob() {
     state.logKey = key;
     state.logCursor = 0;
     logEl.textContent = '';
+    // The run id is what a reload falls back to once this job record is gone.
+    saveDrawer({ jobId: job.id, runId: job.runId ?? null });
     // Deliberately without updating state.job: the poll below does that, and
     // doing it here would hide a status change from the check that ends the
     // polling timer.
@@ -179,6 +209,7 @@ async function followRun(run) {
   state.job = null;
   if (pollTimer) clearInterval(pollTimer);
   pollTimer = null;
+  saveDrawer({ jobId: null, runId: run.id });
   logEl.textContent = '';
   drawer.hidden = false;
   toggleDrawer(false);
@@ -1350,14 +1381,36 @@ async function render() {
   }
 }
 
-/** Reattach to a job still running from an earlier page load. */
+/**
+ * Bring the drawer back as an earlier page load left it. A job still running
+ * wins, since it is what the operator is waiting on; otherwise the log last
+ * shown - its job while this process still holds it, then the run's stored
+ * log, which also outlives a server restart.
+ */
 async function resume() {
+  const saved = loadDrawer();
   const jobs = await api('/api/jobs').catch(() => []);
   const running = jobs.find((job) => job.status === 'running');
-  if (running) {
-    follow(running);
-    toggleDrawer(true);
+  const savedJob = saved?.jobId && jobs.find((job) => job.id === saved.jobId);
+
+  if (running || savedJob) {
+    const job = running ?? savedJob;
+    follow(job);
+    // A running job nobody opened here yet arrives collapsed, as it always has.
+    toggleDrawer(saved?.jobId === job.id ? Boolean(saved.collapsed) : true);
+    return;
   }
+
+  if (saved?.runId) {
+    const page = await api(`/api/runs/${saved.runId}/log?limit=1`).catch(() => null);
+    if (page) {
+      await followRun(page.run);
+      toggleDrawer(Boolean(saved.collapsed));
+      return;
+    }
+  }
+
+  saveDrawer(null);
 }
 
 await loadOverview();

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 // apiFetch attaches the caller's Supabase access token; the API 401s without it.
-import { ApiError, apiFetch } from '../lib/api';
+import { ApiError, apiFetch, isConnectionError } from '../lib/api';
+import { onReconnect } from '../lib/connectivity';
 import { useLanguage } from '../lib/i18n';
 import { t } from '../lib/i18n/translate';
 
@@ -136,6 +137,14 @@ export function useRecipe(options: UseRecipeOptions): UseRecipeResult {
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const mountedRef = useRef<boolean>(true);
+  // The recipe already on screen, so a refetch that fails for want of a
+  // connection can keep showing it instead of swapping in an error page.
+  const dataRef = useRef<RecipeDetail | null>(null);
+  useEffect(() => {
+    dataRef.current = data;
+  }, [data]);
+  /** A refetch failed on the connection and the recipe shown is the old one. */
+  const [stale, setStale] = useState(false);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -144,13 +153,18 @@ export function useRecipe(options: UseRecipeOptions): UseRecipeResult {
     };
   }, []);
 
-  const fetchRecipe = useCallback(async () => {
+  /**
+   * `background` skips the loading flag, for a reload under a recipe that is
+   * already on screen: both screens swap their whole body for a spinner while
+   * loading, which mid-cook would be worse than the stale copy.
+   */
+  const load = useCallback(async (background: boolean) => {
     if (!id) {
       setError(t('error.recipeIdRequired'));
       return;
     }
 
-    setLoading(true);
+    if (!background) setLoading(true);
     setError(null);
     
     try {
@@ -173,11 +187,16 @@ export function useRecipe(options: UseRecipeOptions): UseRecipeResult {
       const mapped = mapDbRowToRecipeDetail(recipeData);
       
       if (mountedRef.current) {
+        setStale(false);
         setData(mapped);
       }
     } catch (err: any) {
+      // Stale-but-present beats an error page mid-recipe; the connection
+      // banner already says what is wrong, and onReconnect below reloads.
+      const keepStale = !!dataRef.current && isConnectionError(err);
       if (mountedRef.current) {
-        setError(err?.message ?? t('error.recipeFetch'));
+        if (keepStale) setStale(true);
+        else setError(err?.message ?? t('error.recipeFetch'));
       }
     } finally {
       if (mountedRef.current) {
@@ -186,12 +205,21 @@ export function useRecipe(options: UseRecipeOptions): UseRecipeResult {
     }
   }, [id, locale]);
 
+  const fetchRecipe = useCallback(() => load(false), [load]);
+
   useEffect(() => {
     // Fetch recipe when the id or the reader's language changes
     if (id) {
       fetchRecipe();
     }
   }, [id, locale]);
+
+  // Reload once the API is reachable again if the last attempt failed, or if
+  // the recipe on screen is one a failed refetch left stale.
+  useEffect(() => {
+    if (!error && !stale) return;
+    return onReconnect(() => void load(!error));
+  }, [error, stale, load]);
 
   return {
     data,

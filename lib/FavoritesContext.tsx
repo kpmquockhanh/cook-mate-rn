@@ -53,8 +53,9 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
 
     try {
       // PUT and DELETE rather than a toggle endpoint, so a retry lands on the
-      // state the user asked for instead of flipping it twice.
-      await apiFetch(`/recipes/${key}/favorite`, { method: next ? 'PUT' : 'DELETE' });
+      // state the user asked for instead of flipping it twice - which is also
+      // what makes it safe to let apiFetch retry a blip.
+      await apiFetch(`/recipes/${key}/favorite`, { method: next ? 'PUT' : 'DELETE', retries: 2 });
       setVersion((current) => current + 1);
     } catch (error) {
       log.warn('could not save favourite', String(error));

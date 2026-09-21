@@ -77,9 +77,6 @@ coverage/
 ## .cursor/
 .cursor/
 
-## Bmad
-.bmad-core/
-
 ## Supabase CLI local state
 supabase/.temp/
 
@@ -91,3 +88,6 @@ __pycache__/
 tools/wakeword/.venv/
 tools/wakeword/data/
 tools/wakeword/work/
+
+# Claude Code personal settings
+.claude/settings.local.json

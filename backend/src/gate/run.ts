@@ -18,7 +18,15 @@ export async function gateAll(limit: number): Promise<Record<string, number>> {
        join crawler.raw_pages r on r.id = s.raw_page_id
       where s.status in ('parsed','enriched','review','rejected')
         and s.edited_by_human = false
-      order by s.id
+        -- A row that has not been enriched yet is not ready to be graded.
+        -- Grading it hits the fatal not_enriched issue and parks it in
+        -- 'rejected', which the enrich stage never reads - so it is never
+        -- enriched, and it stays in this queue forever.
+        and s.enriched is not null
+      -- Never-gated rows first, then the longest-ago gated. Ordering by id alone
+      -- made the lowest-id rows (already rejected, and unchanged since) fill the
+      -- whole limit on every run and starve newer rows behind them.
+      order by s.gated_at asc nulls first, s.id
       limit $1`,
     [limit],
   );
