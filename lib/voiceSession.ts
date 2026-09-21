@@ -16,7 +16,17 @@ export type VoiceSessionStatus =
   /** Credentials in hand, not connected. The user starts it from here. */
   | 'ready'
   | 'connecting'
-  /** In the room with an agent worker: the only state where talking works. */
+  /**
+   * In the room with an agent, mic muted, detector listening on the device.
+   * Nothing the user says reaches the agent until "Hey CookMate" or a tap.
+   */
+  | 'waiting-for-wake-word'
+  /**
+   * As above, but the detector could not start (web, a missing model, a
+   * capture failure). The mic tap still opens a listening window.
+   */
+  | 'wake-word-unavailable'
+  /** A listening window is open: the only state where talking reaches the agent. */
   | 'listening'
   /** In the room, but no worker joined - usually the agent is not running. */
   | 'no-agent'
@@ -102,6 +112,20 @@ const COPY: Record<VoiceStatus, StatusCopy> = {
     tone: 'neutral',
     canRetry: false,
   },
+  'waiting-for-wake-word': {
+    icon: 'mic-outline',
+    stateKey: 'voice.waiting',
+    actionKey: 'voice.waitingAction',
+    tone: 'neutral',
+    canRetry: false,
+  },
+  'wake-word-unavailable': {
+    icon: 'mic-outline',
+    stateKey: 'voice.wakeUnavailable',
+    actionKey: 'voice.wakeUnavailableAction',
+    tone: 'warn',
+    canRetry: false,
+  },
   listening: {
     icon: 'mic',
     stateKey: 'voice.listening',
@@ -163,6 +187,19 @@ export function describeVoiceStatus(
   return { icon, label, tone, canRetry };
 }
 
+/**
+ * Whether the agent is in the room and can talk, whether or not the mic is
+ * open. The cooking screen uses this, not 'listening', to keep the device's
+ * own step reader quiet: the agent narrates while the user's mic is muted too.
+ */
+export function isAgentConnected(status: VoiceStatus): boolean {
+  return (
+    status === 'waiting-for-wake-word' ||
+    status === 'wake-word-unavailable' ||
+    status === 'listening'
+  );
+}
+
 export interface VoiceControlIcon {
   name: VoiceIcon;
   color: string;
@@ -185,6 +222,14 @@ export function voiceControlIcon(
       return agentSpeaking
         ? { name: 'volume-high', color: '#4ECDC4' }
         : { name: 'mic', color: '#FFFFFF' };
+    case 'waiting-for-wake-word':
+      return agentSpeaking
+        ? { name: 'volume-high', color: '#4ECDC4' }
+        : { name: 'mic-outline', color: '#FFFFFF' };
+    case 'wake-word-unavailable':
+      return agentSpeaking
+        ? { name: 'volume-high', color: '#4ECDC4' }
+        : { name: 'mic-outline', color: '#FDE68A' };
     case 'ready':
       return { name: 'mic-outline', color: '#FFFFFF' };
     case 'connecting':

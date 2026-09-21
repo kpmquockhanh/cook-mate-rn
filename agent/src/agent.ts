@@ -50,7 +50,9 @@ function buildTTS() {
     const model = optionalEnv('TTS_MODEL') ?? 'inworld/inworld-tts-2';
     const voice = optionalEnv('TTS_VOICE') ?? 'Ashley';
     const language = optionalEnv('TTS_LANGUAGE') ?? LANGUAGE;
-    console.log(`[cookmate] TTS: LiveKit Inference ${model} (voice "${voice}", language ${language})`);
+    console.log(
+      `[cookmate] TTS: LiveKit Inference ${model} (voice "${voice}", language ${language})`
+    );
     return new inference.TTS({ model, voice, language });
   }
 
@@ -139,19 +141,26 @@ export default defineAgent({
         navigateNext: llm.tool({
           description:
             'Navigate to the next cooking step. Call this when the user wants to move forward. Returns the text of the step now shown.',
-          execute: async () =>
-            notifyApp('navigate_next', 'Failed to navigate to next step'),
+          execute: async () => notifyApp('navigate_next', 'Failed to navigate to next step'),
         }),
         navigateBack: llm.tool({
           description:
             'Navigate to the previous cooking step. Call this when the user wants to go back. Returns the text of the step now shown.',
-          execute: async () =>
-            notifyApp('navigate_back', 'Failed to navigate to previous step'),
+          execute: async () => notifyApp('navigate_back', 'Failed to navigate to previous step'),
         }),
         repeatStep: llm.tool({
           description:
             'Get the current cooking step instructions. Call this when the user asks to hear the step again. Returns the text of the step now shown.',
           execute: async () => notifyApp('repeat_step', 'Failed to repeat step'),
+        }),
+        endListening: llm.tool({
+          description:
+            'Close the microphone on the app. Call this when the user says they are done for now (thanks, that is all, cảm ơn). Harmless if it is already closed.',
+          execute: async () =>
+            notifyApp(
+              'close_listening',
+              'Listening could not be closed on the app; say nothing about it'
+            ),
         }),
       },
     });
@@ -192,6 +201,14 @@ export default defineAgent({
       agent,
       room: ctx.room,
       inputOptions: nc ? { noiseCancellation: nc } : undefined,
+    });
+
+    // The app calls this when the user says the wake word over the agent: stop
+    // talking now, the user has something to say.
+    ctx.room.localParticipant?.registerRpcMethod('interrupt', async () => {
+      console.info('[cookmate] RPC interrupt');
+      void session.interrupt();
+      return 'ok';
     });
 
     // Resolves as soon as the app publishes its first state, so the greeting can
@@ -239,8 +256,8 @@ export default defineAgent({
     await session.generateReply({
       instructions:
         (initialState
-          ? `Greet the user, mention that you will be helping them cook ${initialState.title}, and ask if they are ready to start.`
-          : 'Greet the user and ask if they are ready to start cooking.') +
+          ? `Greet the user and mention that you will be helping them cook ${initialState.title}. Do not ask a question.`
+          : 'Greet the user and say you can help them cook. Do not ask a question.') +
         ` Speak in ${LANGUAGE_NAME}. Keep it to one or two short sentences.`,
     });
   },

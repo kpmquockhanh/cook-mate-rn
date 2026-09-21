@@ -65,7 +65,7 @@ The two durations are constants in `lib/listeningWindow.ts`, not user settings.
 1. **`modules/wake-word/`**: a local Expo native module (Swift + Kotlin).
    - Runs the openWakeWord pipeline (melspectrogram → embedding → `hey_cookmate`
      classifier) with ONNX Runtime, using models bundled in the module.
-   - API: `start(options: { threshold: number })`, `stop()`, `setThreshold(n)`.
+   - API: `start(threshold: number)`, `stop()`, `setThreshold(n)`.
    - Events: `onWakeWord({ score })`, `onInterrupted()`, `onResumed()`,
      `onError({ message })`.
    - Knows nothing about LiveKit, settings or UI.

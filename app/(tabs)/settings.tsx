@@ -20,6 +20,7 @@ import {
   PRE_ALERT_CHOICES,
   SERVINGS_RANGE,
   SPEECH_RATE_RANGE,
+  WAKE_WINDOW_CHOICES,
 } from '../../lib/SettingsContext';
 import { supabase } from '../../lib/supabase';
 import { confirmAction, notify } from '../../utils/confirm';
@@ -219,6 +220,26 @@ export default function Settings() {
             value={settings.voiceAutoStart}
             disabled={!settings.voiceEnabled}
             onChange={(value) => updateSetting('voiceAutoStart', value)}
+          />
+          <SegmentedRow
+            icon="hearing"
+            label={t('settings.voiceWakeWindow')}
+            description={t(
+              settings.voiceWakeWindow === 'quick'
+                ? 'settings.voiceWakeWindowQuickDescription'
+                : 'settings.voiceWakeWindowConversationDescription'
+            )}
+            value={settings.voiceWakeWindow}
+            disabled={!settings.voiceEnabled}
+            options={WAKE_WINDOW_CHOICES.map((mode) => ({
+              label: t(
+                mode === 'quick'
+                  ? 'settings.voiceWakeWindowQuick'
+                  : 'settings.voiceWakeWindowConversation'
+              ),
+              value: mode,
+            }))}
+            onChange={(value) => updateSetting('voiceWakeWindow', value)}
           />
           <ToggleRow
             icon="record-voice-over"

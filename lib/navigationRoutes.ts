@@ -15,6 +15,9 @@ export type StackScreen = { name: string; transition: ScreenTransition };
 export const ROOT_SCREENS: StackScreen[] = [
   { name: '(tabs)', transition: 'fade' },
   { name: 'cooking/[id]', transition: 'modal' },
+  // Development only: the wake-word spike and model parity checks. The screen
+  // itself refuses to render outside __DEV__.
+  { name: 'dev/wake-word', transition: 'slide' },
 ];
 
 // Lives inside the Home tab rather than the root stack, so the tab bar stays

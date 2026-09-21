@@ -45,19 +45,20 @@ Thumbs.db
 *.orig.*
 
 ## Android
-android
-android/.gradle/
-android/captures/
-android/app/build/
-android/build/
+/android
+/android/.gradle/
+/android/captures/
+/android/app/build/
+/android/build/
 .gradle/
 *.keystore
 
 ## iOS
-ios
-ios/Pods/
-ios/build/
-ios/DerivedData/
+/ios
+/ios/Pods/
+/ios/build/
+/ios/DerivedData/
+Pods/
 *.xcuserdatad
 *.xcworkspace/xcuserdata/
 *.xcuserstate
@@ -83,6 +84,10 @@ supabase/.temp/
 ## Python caches
 __pycache__/
 *.pyc
+
+tools/wakeword/.venv/
+tools/wakeword/data/
+tools/wakeword/work/
 
 # Claude Code personal settings
 .claude/settings.local.json
