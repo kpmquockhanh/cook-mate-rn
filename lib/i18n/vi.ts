@@ -160,7 +160,7 @@ const vi: Record<TranslationKey, Phrase> = {
   'cooking.currentStep': 'Bước hiện tại',
   'cooking.noInstruction': 'Không có hướng dẫn',
   'cooking.voiceHint':
-    'Nói “bước tiếp theo”, “quay lại” hoặc “nhắc lại” để điều khiển mà không cần chạm tay.',
+    'Gọi “Hey CookMate”, rồi nói “bước tiếp theo”, “quay lại” hoặc “nhắc lại” để điều khiển mà không cần chạm tay.',
   'cooking.allSteps': 'Tất cả các bước ({count})',
   'cooking.youWillNeed': 'Bạn sẽ cần',
   'cooking.ingredientCount': '{count} nguyên liệu',

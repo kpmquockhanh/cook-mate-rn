@@ -93,3 +93,9 @@ same audio `golden.json` was scored on), and `golden.json` into
 ## Current model
 
 - Not trained yet. Fill in the date, openWakeWord tag, threshold and the evaluate.py numbers in the same commit as the model.
+- Until then, `modules/wake-word/models/hey_cookmate.onnx` is a **placeholder**: openWakeWord's
+  pretrained `hey_jarvis_v0.1.onnx` (release tag `v0.5.1`), renamed so the app code needs no
+  changes once a real "hey_cookmate" model lands. Saying "Hey Jarvis" triggers detection during
+  this flow-testing phase, not "Hey CookMate". `melspectrogram.onnx` and `embedding_model.onnx`
+  in the same directory are the frozen, phrase-independent feature models from the same release
+  and do not need to be retrained - only the classifier does.

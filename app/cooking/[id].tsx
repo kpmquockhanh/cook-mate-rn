@@ -30,6 +30,7 @@ import { reportRecipeEvent } from '../../lib/recipeEvents';
 import { useLiveKitToken } from '../../lib/livekitToken';
 import {
   describeVoiceStatus,
+  isAgentConnected,
   type VoiceSessionStatus,
   type VoiceStatus,
   type VoiceTone,
@@ -138,6 +139,11 @@ export default function CookingPage() {
   const voiceDetail = livekit ? voiceSession.detail : livekitError;
   const voiceCopy = describeVoiceStatus(voiceStatus, voiceDetail, t);
   const voiceListening = voiceStatus === 'listening';
+  // Broader than voiceListening: true for the whole session (waiting for the
+  // wake word, an open window, or no worker), not just while it is open. Used
+  // to suppress the on-device TTS and to word the hint without claiming the
+  // agent is listening right now.
+  const voiceConnected = isAgentConnected(voiceStatus);
 
   // This screen is normally pushed from the recipe detail screen, but a deep
   // link or a dev-mode reload can land here as the stack's only entry, where
@@ -384,7 +390,7 @@ export default function CookingPage() {
   // reading the same instruction over each other is worse than neither.
   const stepText = currentStepData?.instruction_text;
   useEffect(() => {
-    if (!settings.spokenSteps || voiceListening || !stepText) return;
+    if (!settings.spokenSteps || voiceConnected || !stepText) return;
 
     // Cut off whatever is still being said: on a fast double-tap through the
     // steps the queue would otherwise read every step the user skipped.
@@ -402,7 +408,7 @@ export default function CookingPage() {
   }, [
     settings.spokenSteps,
     settings.speechRate,
-    voiceListening,
+    voiceConnected,
     stepText,
     currentStep,
     t,
@@ -489,6 +495,7 @@ export default function CookingPage() {
                 onPreviousStep={goToPreviousStep}
                 onRepeatStep={repeatCurrentStep}
                 autoStart={settings.voiceAutoStart}
+                wakeWindow={settings.voiceWakeWindow}
                 onStatusChange={handleVoiceStatus}
               />
             </View>
@@ -599,9 +606,11 @@ export default function CookingPage() {
               {currentStepData?.instruction_text || t('cooking.noInstruction')}
             </Text>
 
-            {/* Only while the agent is actually listening. Shown unconditionally
-                it told users to talk to an assistant that was not connected. */}
-            {voiceListening && (
+            {/* Whenever the agent is in the room, not only while the window is
+                open - the hint says the wake phrase, not "start talking now".
+                Shown unconditionally it told users to talk to an assistant
+                that was not connected. */}
+            {voiceConnected && (
               <View className="mt-5 flex-row rounded-2xl bg-orange-50 p-4">
                 <Ionicons name="mic-outline" size={20} color={SECONDARY} />
                 <Text className="ml-3 flex-1 text-sm leading-6 text-gray-700">

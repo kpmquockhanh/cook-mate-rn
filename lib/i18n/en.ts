@@ -177,7 +177,8 @@ const en = {
   'cooking.percentDone': '{percent}% done',
   'cooking.currentStep': 'Current step',
   'cooking.noInstruction': 'No instruction available',
-  'cooking.voiceHint': 'Say “next step”, “go back” or “repeat” to navigate hands-free.',
+  'cooking.voiceHint':
+    'Say “Hey CookMate”, then “next step”, “go back” or “repeat” to navigate hands-free.',
   'cooking.allSteps': 'All steps ({count})',
   'cooking.youWillNeed': 'You’ll need',
   'cooking.ingredientCount': { one: '{count} item', other: '{count} items' },

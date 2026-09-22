@@ -9,7 +9,9 @@ Pod::Spec.new do |s|
   s.static_framework = true
   s.swift_version  = '5.9'
   s.dependency 'ExpoModulesCore'
+  s.dependency 'onnxruntime-objc', '~> 1.20.0'
   s.source_files = '**/*.{h,m,swift}'
+  s.resources = ['../models/*.onnx']
   s.pod_target_xcconfig = {
     'DEFINES_MODULE' => 'YES',
     'SWIFT_COMPILATION_MODE' => 'wholemodule'

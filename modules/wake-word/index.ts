@@ -17,6 +17,8 @@ declare class WakeWordNativeModule extends NativeModule<WakeWordNativeEvents> {
   start(threshold: number): Promise<void>;
   stop(): Promise<void>;
   setThreshold(threshold: number): void;
+  /** Development only: the max score over a 16 kHz mono WAV at a local path or file:// URI. */
+  scoreWav(path: string): Promise<number>;
 }
 
 export type { WakeWordNativeModule };
