@@ -22,10 +22,16 @@ piper_sample_generator_path: "./work/piper-sample-generator"
 output_dir: "./work/out"
 rir_paths:
   - "./data/rirs"
+# Both are scanned non-recursively, so they are siblings rather than one
+# folder with subfolders. Your own kitchen audio is duplicated because
+# there is far less of it than AudioSet and it is the closer match to what
+# the phone mic actually hears.
 background_paths:
-  - "./data/background"
+  - "./data/background/audioset"
+  - "./data/background/kitchen"
 background_paths_duplication_rate:
   - 1
+  - 2
 false_positive_validation_data_path: "./data/validation_set_features.npy"
 augmentation_rounds: 1
 feature_data_files:
