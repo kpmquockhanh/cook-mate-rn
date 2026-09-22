@@ -3,9 +3,35 @@ piper-tts==1.2.0
 datasets==2.19.1
 soundfile==0.12.1
 numpy<2
-scipy
+scipy<1.17  # acoustics imports scipy.special.sph_harm, removed in 1.17
 torch
 torchaudio
-onnxruntime
+# The GPU build: train.py asks for CUDAExecutionProvider, and the plain
+# onnxruntime wheel makes it fall back to CPU for the melspectrogram and
+# embedding passes over every generated clip. It needs CUDA 13 + cuDNN 9,
+# which torch's own nvidia-* wheels provide -- but only once torch is
+# imported first, as train.py does on line 1.
+onnxruntime-gpu
 pyyaml
 tqdm
+librosa
+
+# openWakeWord's train.py / data.py pull these in; they are not declared by the
+# openwakeword wheel because they are only needed for training, not inference.
+torchinfo
+# torch 2.14's torch.onnx.export routes through the dynamo exporter, which
+# imports onnxscript; openWakeWord's export_model() fails without it after a
+# full training run has already completed.
+onnxscript
+torchmetrics
+pronouncing
+audiomentations==0.33.0
+torch-audiomentations
+speechbrain
+mutagen
+acoustics
+deep-phonemizer
+# piper-sample-generator v2.0.0's generate_samples.py; webrtcvad still imports
+# pkg_resources, which setuptools dropped in 81.
+webrtcvad
+setuptools<81
