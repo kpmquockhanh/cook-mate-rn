@@ -81,8 +81,30 @@ final class WakeWordPipeline {
     return score.first
   }
 
+  /// WakeWord is a static framework, so CocoaPods never copies its own
+  /// Resources into the app - only its compiled code gets linked in. The
+  /// podspec instead declares a `resource_bundles` entry, which lands as
+  /// `WakeWord.bundle` next to whichever bundle the framework's code ends up
+  /// in; find that one first, then fall back for safety.
+  private static func candidateBundles() -> [Bundle] {
+    let framework = Bundle(for: WakeWordPipeline.self)
+    var bundles = [framework]
+    if let url = framework.url(forResource: "WakeWord", withExtension: "bundle"),
+      let resourceBundle = Bundle(url: url)
+    {
+      bundles.insert(resourceBundle, at: 0)
+    }
+    bundles.append(Bundle.main)
+    if let url = Bundle.main.url(forResource: "WakeWord", withExtension: "bundle"),
+      let resourceBundle = Bundle(url: url)
+    {
+      bundles.append(resourceBundle)
+    }
+    return bundles
+  }
+
   private static func load(_ name: String, _ env: ORTEnv) throws -> Model {
-    let bundles = [Bundle(for: WakeWordPipeline.self), Bundle.main]
+    let bundles = candidateBundles()
     guard let path = bundles.lazy.compactMap({ $0.path(forResource: name, ofType: "onnx") }).first else {
       throw PipelineError.missingModel(name)
     }
