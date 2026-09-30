@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
-import { isSupportedImageType, pathForImage } from '../src/storage/images.js';
+import test, { afterEach } from 'node:test';
+import { PutObjectCommand } from '@aws-sdk/client-s3';
+import { env } from '../src/env.js';
+import { isSupportedImageType, pathForImage, publicBaseUrl, storeImage } from '../src/storage/images.js';
+import { setS3ClientForTests } from '../src/storage/s3.js';
 import { normalizeImages } from '../src/crawl/images.js';
 
 const BYTES = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
@@ -40,4 +43,46 @@ test('CDN resize variants of one photo mirror once', () => {
     'https://cdn.example.com/hero.jpg',
     'https://cdn.example.com/other.jpg',
   ]);
+});
+
+afterEach(() => {
+  setS3ClientForTests(null);
+});
+
+test('a stored image goes to the image bucket with its real type and a long cache lifetime', async () => {
+  const sent: unknown[] = [];
+  setS3ClientForTests({
+    async send(command: unknown) {
+      sent.push(command);
+      return {};
+    },
+  });
+
+  const objectPath = await storeImage(BYTES, 'IMAGE/PNG; charset=binary');
+
+  assert.equal(objectPath, pathForImage(BYTES, 'image/png'));
+  const command = sent[0];
+  assert.ok(command instanceof PutObjectCommand);
+  assert.equal(command.input.Bucket, env.recipeImageBucket);
+  assert.equal(command.input.Key, objectPath);
+  assert.equal(command.input.ContentType, 'image/png');
+  assert.equal(command.input.CacheControl, 'public, max-age=31536000, immutable');
+});
+
+test('the public base URL uses S3_PUBLIC_URL, else S3_ENDPOINT, without doubled slashes', () => {
+  const saved = { public: process.env.S3_PUBLIC_URL, endpoint: process.env.S3_ENDPOINT };
+  try {
+    process.env.S3_ENDPOINT = 'http://minio:9000/';
+    process.env.S3_PUBLIC_URL = 'http://192.168.1.20:9000/';
+    assert.equal(publicBaseUrl(), `http://192.168.1.20:9000/${env.recipeImageBucket}`);
+
+    process.env.S3_PUBLIC_URL = '';
+    assert.equal(publicBaseUrl(), `http://minio:9000/${env.recipeImageBucket}`);
+
+    process.env.S3_ENDPOINT = '';
+    assert.throws(() => publicBaseUrl(), /S3_PUBLIC_URL.*S3_ENDPOINT/);
+  } finally {
+    process.env.S3_PUBLIC_URL = saved.public ?? '';
+    process.env.S3_ENDPOINT = saved.endpoint ?? '';
+  }
 });

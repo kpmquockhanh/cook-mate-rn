@@ -106,13 +106,18 @@ async function main() {
     case 'setup':
       await migrate();
       await seedCanonical();
-      // Crawling writes its first page to object storage, so the bucket being
-      // absent should surface here and not on the first fetch. A project
-      // without storage credentials yet is a warning, not a failed setup.
+      // Crawling writes its first page to object storage, so a missing bucket
+      // should surface here and not on the first fetch. A machine without
+      // storage credentials yet is a warning, not a failed setup.
       try {
         log.info(await ensureBucket());
       } catch (error) {
         log.warn(`page storage not ready: ${String(error)}`);
+      }
+      try {
+        log.info(await ensureImageBucket());
+      } catch (error) {
+        log.warn(`image storage not ready: ${String(error)}`);
       }
       log.info('setup complete - run `npm run publish -- --check` to verify the app schema');
       break;
