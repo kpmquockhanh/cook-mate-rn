@@ -4,18 +4,23 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test, { after, before } from 'node:test';
 import { gunzipSync } from 'node:zlib';
+import { GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 
-// `env` reads these once, at module load, so they are set before the store is
-// imported. The filesystem driver is what keeps this suite free of a Supabase
-// project - the deployed crawler uses Supabase Storage.
+// Set before the store is imported. The filesystem driver keeps most of this
+// suite free of an object store; the s3 driver is exercised through a fake
+// client at the end.
 let dir: string;
 let store: typeof import('../src/storage/pages.js');
+let s3: typeof import('../src/storage/s3.js');
+let env: typeof import('../src/env.js').env;
 
 before(async () => {
   dir = await mkdtemp(path.join(tmpdir(), 'cookmate-pages-'));
   process.env.RAW_PAGE_STORE = 'file';
   process.env.RAW_PAGE_DIR = dir;
   store = await import('../src/storage/pages.js');
+  s3 = await import('../src/storage/s3.js');
+  env = (await import('../src/env.js')).env;
 });
 
 after(async () => {
@@ -62,4 +67,62 @@ test('non-UTF8-safe content survives the round trip', async () => {
 
 test('a missing object reads as null rather than throwing', async () => {
   assert.equal(await store.readPage('ff/does-not-exist.html.gz'), null);
+});
+
+/** Swap to the s3 driver backed by an in-memory fake; returns the fake's objects. */
+function useFakeS3(): Map<string, Uint8Array> {
+  const objects = new Map<string, Uint8Array>();
+  s3.setS3ClientForTests({
+    async send(command: unknown) {
+      const { Bucket, Key, Body } = (command as { input: { Bucket: string; Key: string; Body?: Uint8Array } })
+        .input;
+      if (command instanceof PutObjectCommand) {
+        objects.set(`${Bucket}/${Key}`, Body!);
+        return {};
+      }
+      if (command instanceof GetObjectCommand) {
+        const bytes = objects.get(`${Bucket}/${Key}`);
+        if (!bytes) {
+          throw Object.assign(new Error('NoSuchKey'), { name: 'NoSuchKey', $metadata: { httpStatusCode: 404 } });
+        }
+        return { Body: { transformToByteArray: async () => bytes } };
+      }
+      throw new Error(`unexpected command ${String(command)}`);
+    },
+  });
+  process.env.RAW_PAGE_STORE = '';
+  store.resetPageStore();
+  return objects;
+}
+
+function useFileStore(): void {
+  s3.setS3ClientForTests(null);
+  process.env.RAW_PAGE_STORE = 'file';
+  store.resetPageStore();
+}
+
+test('with RAW_PAGE_STORE unset, pages go to the raw-page bucket, gzipped', async () => {
+  const objects = useFakeS3();
+  try {
+    const html = '<html><body>bún chả</body></html>';
+    const objectPath = await store.writePage('d'.repeat(64), html);
+
+    const stored = objects.get(`${env.rawPageBucket}/${objectPath}`);
+    assert.ok(stored, 'object written to the raw-page bucket');
+    assert.equal(gunzipSync(stored).toString('utf8'), html);
+    assert.equal(await store.readPage(objectPath), html);
+    assert.equal(await store.readPage('ff/missing.html.gz'), null);
+  } finally {
+    useFileStore();
+  }
+});
+
+test('a leftover RAW_PAGE_STORE value from before MinIO is rejected, not guessed at', () => {
+  process.env.RAW_PAGE_STORE = 'supabase';
+  store.resetPageStore();
+  try {
+    assert.throws(() => store.describeStore(), /RAW_PAGE_STORE="supabase".*s3.*file/);
+  } finally {
+    useFileStore();
+  }
 });

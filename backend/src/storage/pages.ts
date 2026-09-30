@@ -3,6 +3,7 @@ import path from 'node:path';
 import { gunzipSync, gzipSync } from 'node:zlib';
 import { env } from '../env.js';
 import { logger } from '../log.js';
+import { ensureBucket as ensureS3Bucket, getObject, putObject, s3Client } from './s3.js';
 
 const log = logger('storage');
 
@@ -27,69 +28,16 @@ interface PageStore {
   describe(): string;
 }
 
-// --- Supabase Storage -------------------------------------------------------
+// --- S3 (MinIO) ---------------------------------------------------------------
 
-function supabaseConfig(): { url: string; key: string; bucket: string } {
-  const url = env.supabaseUrl;
-  const key = env.supabaseServiceRoleKey;
-  if (!url || !key) {
-    throw new Error(
-      'Raw page storage is not configured: set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY. ' +
-        'For local work without Supabase, set RAW_PAGE_STORE=file. See backend/.env.example.',
-    );
-  }
-  return { url, key, bucket: env.rawPageBucket };
-}
-
-function supabaseStore(): PageStore {
-  const object = (objectPath: string) => {
-    const { url, bucket } = supabaseConfig();
-    return `${url}/storage/v1/object/${bucket}/${objectPath}`;
-  };
-  const auth = () => {
-    const { key } = supabaseConfig();
-    // Storage wants both: `apikey` identifies the project, the bearer token
-    // carries the role. The service role is what lets the crawler write to a
-    // bucket the app's users cannot.
-    return { apikey: key, authorization: `Bearer ${key}` };
-  };
-
+function s3Store(): PageStore {
+  const bucket = env.rawPageBucket;
   return {
-    async put(objectPath, body) {
-      const response = await fetch(object(objectPath), {
-        method: 'POST',
-        headers: {
-          ...auth(),
-          'content-type': 'application/gzip',
-          // Content-addressed keys mean a repeat write is the same bytes, so
-          // overwriting is always safe and never loses anything.
-          'x-upsert': 'true',
-        },
-        body,
-        signal: AbortSignal.timeout(env.crawlTimeoutMs),
-      });
-      if (!response.ok) {
-        throw new Error(
-          `storage upload failed (${response.status}) for ${objectPath}: ${await response.text()}`,
-        );
-      }
-    },
-
-    async get(objectPath) {
-      const response = await fetch(object(objectPath), {
-        headers: auth(),
-        signal: AbortSignal.timeout(env.crawlTimeoutMs),
-      });
-      if (response.status === 404) return null;
-      if (!response.ok) {
-        throw new Error(`storage read failed (${response.status}) for ${objectPath}`);
-      }
-      return new Uint8Array(await response.arrayBuffer());
-    },
-
+    put: (objectPath, body) => putObject(bucket, objectPath, body, { contentType: 'application/gzip' }),
+    get: (objectPath) => getObject(bucket, objectPath),
     describe() {
-      const { url, bucket } = supabaseConfig();
-      return `supabase ${url}/storage/v1 bucket "${bucket}"`;
+      s3Client(); // throws the "not configured" error rather than describing a store that isn't there
+      return `s3 ${env.s3Endpoint} bucket "${bucket}"`;
     },
   };
 }
@@ -99,31 +47,18 @@ function supabaseStore(): PageStore {
  * material, not something to serve publicly.
  */
 export async function ensureBucket(): Promise<string> {
-  if (env.rawPageStore === 'file') return `local directory ${path.resolve(env.rawPageDir)}`;
+  if (storeKind() === 'file') return `local directory ${path.resolve(env.rawPageDir)}`;
 
-  const { url, key, bucket } = supabaseConfig();
-  const headers = { apikey: key, authorization: `Bearer ${key}`, 'content-type': 'application/json' };
-
-  const existing = await fetch(`${url}/storage/v1/bucket/${bucket}`, { headers });
-  if (existing.ok) return `bucket "${bucket}" already exists`;
-
-  const created = await fetch(`${url}/storage/v1/bucket`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({ name: bucket, id: bucket, public: false }),
-  });
-  if (!created.ok) {
-    throw new Error(`could not create bucket "${bucket}" (${created.status}): ${await created.text()}`);
-  }
-  return `created private bucket "${bucket}"`;
+  const bucket = env.rawPageBucket;
+  const { created } = await ensureS3Bucket(bucket, { public: false });
+  return created ? `created private bucket "${bucket}"` : `bucket "${bucket}" already exists`;
 }
 
 // --- Local filesystem -------------------------------------------------------
 
 /**
- * For local work and for tests, which must not need a Supabase project to run.
- * Not a second production target: the deployed crawler uses Supabase Storage,
- * same project as auth and the app tables.
+ * For local work and for tests, which must not need an object store to run.
+ * Not a second production target: deployments use the s3 driver.
  */
 function fileStore(): PageStore {
   const root = path.resolve(env.rawPageDir);
@@ -151,8 +86,15 @@ function fileStore(): PageStore {
 
 let store: PageStore | null = null;
 
+/** The configured driver. An unknown value fails loudly rather than falling through to s3. */
+function storeKind(): 'file' | 's3' {
+  const kind = env.rawPageStore;
+  if (kind === 'file' || kind === 's3') return kind;
+  throw new Error(`RAW_PAGE_STORE="${kind}" is not a storage driver: use "s3" (the default) or "file".`);
+}
+
 function pageStore(): PageStore {
-  if (!store) store = env.rawPageStore === 'file' ? fileStore() : supabaseStore();
+  if (!store) store = storeKind() === 'file' ? fileStore() : s3Store();
   return store;
 }
 
