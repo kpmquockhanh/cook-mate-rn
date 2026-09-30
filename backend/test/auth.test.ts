@@ -4,7 +4,10 @@ import test from 'node:test';
 import {
   applyTestAuthEnv,
   authHeaders,
+  installTestJwks,
+  mintHs256Token,
   mintToken,
+  TEST_AUTHORIZED_PARTY,
   TEST_ISSUER,
   TEST_USER_ID,
 } from './auth-helpers.js';
@@ -13,8 +16,9 @@ import {
 applyTestAuthEnv();
 
 const { buildServer } = await import('../src/api/server.js');
-const { verifyAccessToken } = await import('../src/api/auth.js');
+const { setJwksForTesting, verifyAccessToken } = await import('../src/api/auth.js');
 const { close } = await import('../src/db.js');
+installTestJwks(setJwksForTesting);
 
 /**
  * No database needed: the guard rejects before any handler runs, and the one
@@ -31,6 +35,7 @@ test('API authentication', async (t) => {
 
   const get = (headers: Record<string, string> = {}) =>
     app.inject({ method: 'GET', url: '/recipes?limit=1', headers });
+  const bearer = (token: string) => ({ authorization: `Bearer ${token}` });
 
   await t.test('rejects a request with no Authorization header', async () => {
     const response = await get();
@@ -46,48 +51,63 @@ test('API authentication', async (t) => {
   });
 
   await t.test('rejects a token that is not a JWT', async () => {
-    const response = await get({ authorization: 'Bearer not-a-jwt' });
+    const response = await get(bearer('not-a-jwt'));
     assert.equal(response.statusCode, 401);
     assert.equal(response.json().reason, 'invalid_token');
   });
 
-  await t.test('rejects a token signed with the wrong secret', async () => {
-    const response = await get({
-      authorization: `Bearer ${await mintToken({ secret: 'a-different-secret-entirely' })}`,
-    });
+  await t.test('rejects a token signed with a key outside the JWKS', async () => {
+    const response = await get(bearer(await mintToken({ wrongKey: true })));
     assert.equal(response.statusCode, 401);
     assert.equal(response.json().reason, 'invalid_token');
   });
 
-  await t.test('rejects a token from another issuer', async () => {
-    const response = await get({
-      authorization: `Bearer ${await mintToken({ issuer: 'https://someone-else.supabase.co/auth/v1' })}`,
-    });
+  await t.test('rejects a token from another Clerk instance', async () => {
+    const response = await get(bearer(await mintToken({ issuer: 'https://someone-else.clerk.accounts.dev' })));
     assert.equal(response.statusCode, 401);
     assert.equal(response.json().reason, 'invalid_token');
   });
 
-  // The publishable/anon key is a JWT too, and it is public. `aud: authenticated`
-  // is what stops it standing in for a signed-in user.
-  await t.test('rejects an anon-audience token', async () => {
-    const response = await get({ authorization: `Bearer ${await mintToken({ audience: 'anon' })}` });
+  // The legacy Supabase path accepted HS256. Clerk never issues it, so a token
+  // using it is forged or stale, whatever its claims say.
+  await t.test('rejects an HS256 token', async () => {
+    const response = await get(bearer(await mintHs256Token()));
     assert.equal(response.statusCode, 401);
     assert.equal(response.json().reason, 'invalid_token');
   });
 
-  await t.test('reports an expired token distinctly so the app can refresh', async () => {
-    const response = await get({
-      authorization: `Bearer ${await mintToken({ expiresInSeconds: -60 })}`,
-    });
+  await t.test('rejects a token with no subject', async () => {
+    const response = await get(bearer(await mintToken({ sub: null })));
     assert.equal(response.statusCode, 401);
-    assert.equal(response.json().reason, 'token_expired');
+    assert.equal(response.json().reason, 'invalid_token');
   });
 
-  await t.test('lets a valid token through to the handler', async () => {
+  await t.test('rejects a web token from an origin that is not an authorized party', async () => {
+    const response = await get(bearer(await mintToken({ azp: 'https://evil.example.com' })));
+    assert.equal(response.statusCode, 401);
+    assert.equal(response.json().reason, 'invalid_token');
+  });
+
+  // CLERK_AUTHORIZED_PARTIES is set with a trailing slash and spaces in
+  // applyTestAuthEnv; the browser's azp has neither.
+  await t.test('accepts a web token from an authorized party, however the list was written', async () => {
+    const first = await get(bearer(await mintToken({ azp: TEST_AUTHORIZED_PARTY })));
+    assert.notEqual(first.statusCode, 401);
+    const second = await get(bearer(await mintToken({ azp: 'https://app.example.com' })));
+    assert.notEqual(second.statusCode, 401);
+  });
+
+  await t.test('accepts a native token, which carries no azp', async () => {
     const response = await get(await authHeaders());
     // 200 with a database behind it, 500 without - either way it is not the
     // guard turning it away.
     assert.notEqual(response.statusCode, 401);
+  });
+
+  await t.test('reports an expired token distinctly so the app can refresh', async () => {
+    const response = await get(bearer(await mintToken({ expiresInSeconds: -60 })));
+    assert.equal(response.statusCode, 401);
+    assert.equal(response.json().reason, 'token_expired');
   });
 
   await t.test('/health stays public - probes carry no session', async () => {
@@ -101,10 +121,11 @@ test('API authentication', async (t) => {
   });
 
   await t.test('verifyAccessToken exposes the claims routes key off', async () => {
-    const user = await verifyAccessToken(await mintToken({ email: 'chef@example.com' }));
+    const user = await verifyAccessToken(await mintToken({ email: 'chef@example.com', name: 'Chef' }));
     assert.equal(user.id, TEST_USER_ID);
     assert.equal(user.email, 'chef@example.com');
-    assert.equal(user.role, 'authenticated');
+    assert.equal(user.name, 'Chef');
+    assert.equal(user.sessionId, 'sess_test');
     assert.equal(user.claims.iss, TEST_ISSUER);
   });
 });

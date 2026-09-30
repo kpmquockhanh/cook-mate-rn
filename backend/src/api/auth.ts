@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { createRemoteJWKSet, errors as joseErrors, jwtVerify, type JWTPayload } from 'jose';
+import { createRemoteJWKSet, errors as joseErrors, jwtVerify, type JWTPayload, type JWTVerifyGetKey } from 'jose';
 import { env } from '../env.js';
 import { logger } from '../log.js';
 
@@ -12,14 +12,15 @@ const log = logger('auth');
  */
 const PUBLIC_ROUTES = new Set(['/health']);
 
-/** The subset of the Supabase access token the app actually acts on. */
+/** The subset of the Clerk session token the app actually acts on. */
 export interface AuthenticatedUser {
-  /** auth.users.id - the uuid to key any per-user row on. */
+  /** Clerk user id (`user_…`) - the string to key any per-user row on. */
   id: string;
+  /** From the session-token template (`{{user.primary_email_address}}`). */
   email: string | null;
-  /** 'authenticated' for a signed-in user; 'anon' never reaches here. */
-  role: string;
-  /** GoTrue session id, useful for correlating logs with a single sign-in. */
+  /** From the session-token template (`{{user.full_name}}`). */
+  name: string | null;
+  /** Clerk session id (`sid`), useful for correlating logs with a single sign-in. */
   sessionId: string | null;
   claims: JWTPayload;
 }
@@ -43,26 +44,18 @@ class AuthError extends Error {
 }
 
 /**
- * Supabase signs access tokens one of two ways, and a project can be on either:
- *
- *   - asymmetric (ES256/RS256) with rotating JWT signing keys, published at the
- *     project's JWKS endpoint - this is the current default, and the reason
- *     SUPABASE_URL is enough on its own;
- *   - HS256 with the legacy project JWT secret, which has to be supplied as
- *     SUPABASE_JWT_SECRET.
- *
- * Resolving the key off the token header covers both without a mode switch, so
- * a project that rotates from one to the other keeps verifying through the
- * changeover instead of rejecting every live session.
+ * Clerk signs session tokens with RS256 keys published at the instance's JWKS
+ * endpoint. The set is cached in-process and only refetched when an unknown
+ * `kid` shows up, with a cooldown so a bad token cannot turn into a fetch loop
+ * against Clerk.
  */
-let jwksRef: ReturnType<typeof createRemoteJWKSet> | null = null;
+let jwksRef: JWTVerifyGetKey | null = null;
+let testJwksRef: JWTVerifyGetKey | null = null;
 
-function jwks(): ReturnType<typeof createRemoteJWKSet> {
+function jwks(): JWTVerifyGetKey {
+  if (testJwksRef) return testJwksRef;
   if (!jwksRef) {
-    // The set is cached in-process and only refetched when an unknown `kid`
-    // shows up, with a cooldown so a bad token cannot turn into a fetch loop
-    // against the auth server.
-    jwksRef = createRemoteJWKSet(new URL(`${env.supabaseUrl}/auth/v1/.well-known/jwks.json`), {
+    jwksRef = createRemoteJWKSet(new URL(`${env.clerkIssuer}/.well-known/jwks.json`), {
       cooldownDuration: 30_000,
       cacheMaxAge: 10 * 60_000,
     });
@@ -70,11 +63,9 @@ function jwks(): ReturnType<typeof createRemoteJWKSet> {
   return jwksRef;
 }
 
-let hmacRef: Uint8Array | null = null;
-
-function hmacKey(): Uint8Array {
-  if (!hmacRef) hmacRef = new TextEncoder().encode(env.supabaseJwtSecret!);
-  return hmacRef;
+/** Test-only: verify against a local key set instead of fetching Clerk's. `null` restores the default. */
+export function setJwksForTesting(keySet: JWTVerifyGetKey | null): void {
+  testJwksRef = keySet;
 }
 
 /**
@@ -82,48 +73,34 @@ function hmacKey(): Uint8Array {
  * every request once it is already serving traffic.
  */
 export function assertAuthConfigured(): void {
-  if (!env.supabaseUrl && !env.supabaseJwtSecret) {
+  if (!env.clerkIssuer) {
     throw new Error(
-      'Auth is not configured: set SUPABASE_URL (asymmetric JWT signing keys) ' +
-        'or SUPABASE_JWT_SECRET (legacy HS256). See backend/.env.example.',
+      'Auth is not configured: set CLERK_ISSUER to the Clerk Frontend API URL. See backend/.env.example.',
     );
   }
 }
 
 /**
- * Verifies a Supabase access token locally. No call to GoTrue on the request
- * path - signature, issuer, audience and expiry are all checkable here, and a
- * per-request round trip to the auth server would put it in the critical path
- * of every read.
+ * Verifies a Clerk session token locally. No call to Clerk on the request path -
+ * signature, issuer, authorized party and expiry are all checkable here, and a
+ * per-request round trip would put Clerk in the critical path of every read.
  */
 export async function verifyAccessToken(token: string): Promise<AuthenticatedUser> {
   try {
-    const { payload } = await jwtVerify(
-      token,
-      async (header, input) => {
-        if (header.alg === 'HS256') {
-          if (!env.supabaseJwtSecret) {
-            throw new Error('token is HS256 but SUPABASE_JWT_SECRET is not set');
-          }
-          return hmacKey();
-        }
-        if (!env.supabaseUrl) {
-          throw new Error(`token is ${header.alg} but SUPABASE_URL is not set`);
-        }
-        return jwks()(header, input);
-      },
-      {
-        // GoTrue stamps `aud: 'authenticated'`. An anon-key JWT carries
-        // `aud: 'anon'` and is not a user, so this is what keeps the
-        // publishable/anon key from being usable as a login.
-        audience: 'authenticated',
-        // Only enforceable when we know the project URL; an HS256-only
-        // deployment has nothing to compare against.
-        ...(env.supabaseUrl ? { issuer: `${env.supabaseUrl}/auth/v1` } : {}),
-        // Phones drift. Anything larger starts to matter for revocation.
-        clockTolerance: 10,
-      },
-    );
+    const { payload } = await jwtVerify(token, jwks(), {
+      issuer: env.clerkIssuer,
+      // Clerk only issues RS256; accepting anything else (HS256 in particular)
+      // would let a leaked shared secret or an alg-confusion trick mint users.
+      algorithms: ['RS256'],
+      // Phones drift. Anything larger starts to matter for revocation - Clerk
+      // tokens only live for about a minute.
+      clockTolerance: 10,
+    });
+
+    // `azp` is the origin that requested a web token. Native tokens have none.
+    if (typeof payload.azp === 'string' && !env.clerkAuthorizedParties.includes(payload.azp)) {
+      throw new AuthError('invalid_token', `azp ${payload.azp} is not an authorized party`);
+    }
 
     if (typeof payload.sub !== 'string' || payload.sub.length === 0) {
       throw new AuthError('invalid_token', 'token has no subject');
@@ -132,15 +109,15 @@ export async function verifyAccessToken(token: string): Promise<AuthenticatedUse
     return {
       id: payload.sub,
       email: typeof payload.email === 'string' ? payload.email : null,
-      role: typeof payload.role === 'string' ? payload.role : 'authenticated',
-      sessionId: typeof payload.session_id === 'string' ? payload.session_id : null,
+      name: typeof payload.name === 'string' && payload.name.trim() ? payload.name : null,
+      sessionId: typeof payload.sid === 'string' ? payload.sid : null,
       claims: payload,
     };
   } catch (error) {
     if (error instanceof AuthError) throw error;
     // Expiry is separated out because it is the one failure the client can fix
-    // by itself: supabase-js refreshes and retries. Lumping it in with a bad
-    // signature would make the app sign the user out instead.
+    // by itself: it fetches a fresh token and retries. Lumping it in with a bad
+    // signature would make the app treat a normal expiry as a broken session.
     if (error instanceof joseErrors.JWTExpired) {
       throw new AuthError('token_expired', 'access token has expired');
     }

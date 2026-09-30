@@ -149,18 +149,25 @@ export const env = {
   apiPort: int('API_PORT', 8787),
 
   // ---- Auth (src/api/auth.ts) ----
-  // Project URL, e.g. https://PROJECT.supabase.co. It gives us both the JWKS
-  // endpoint for asymmetric signing keys and the expected `iss`. Optional only
-  // because a project still on the legacy HS256 secret needs the secret
-  // instead; the API refuses to boot with neither (see assertAuthConfigured).
-  supabaseUrl: process.env.SUPABASE_URL?.replace(/\/$/, ''),
-  // Legacy HS256 project JWT secret. Not the publishable key and not the
-  // service-role key - those are API keys, not signing material.
-  supabaseJwtSecret: process.env.SUPABASE_JWT_SECRET,
+  // The Clerk instance's Frontend API URL, e.g. https://<slug>.clerk.accounts.dev
+  // in development. It is both the expected `iss` and the base of the JWKS
+  // endpoint. The API refuses to boot without it (see assertAuthConfigured).
+  clerkIssuer: process.env.CLERK_ISSUER?.trim().replace(/\/$/, '') || undefined,
+  // Origins allowed to present a web session token (its `azp` claim). Native
+  // tokens carry no `azp` and are unaffected. Empty means no web client is
+  // allowed, which is the safe default for a deployment that forgot to set it.
+  clerkAuthorizedParties: (process.env.CLERK_AUTHORIZED_PARTIES ?? '')
+    .split(',')
+    .map((origin) => origin.trim().replace(/\/$/, ''))
+    .filter(Boolean),
 
   // ---- Raw page storage (src/storage/pages.ts) ----
   // Crawled HTML lives in object storage, not in a Postgres column: it is the
   // largest thing the pipeline keeps and the least often read.
+  //
+  // Project URL, e.g. https://PROJECT.supabase.co. Storage only now - auth
+  // moved to Clerk. Goes away with the move to MinIO.
+  supabaseUrl: process.env.SUPABASE_URL?.replace(/\/$/, ''),
   //
   // The service-role key, not the publishable one - the crawler writes to a
   // bucket the app's users have no access to.

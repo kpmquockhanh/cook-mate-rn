@@ -1,11 +1,11 @@
 import 'dotenv/config';
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { applyTestAuthEnv, authHeaders } from './auth-helpers.js';
+import { applyTestAuthEnv, authHeaders, installTestJwks } from './auth-helpers.js';
 
 // Every route but /health needs a token now. Override the auth env before
 // anything under src/ loads, then mint tokens locally - these tests need a
-// database, not a Supabase auth server.
+// database, not a Clerk instance.
 applyTestAuthEnv();
 
 // These exercise real routes against a real database. They run through
@@ -28,6 +28,8 @@ const skip = await skipReason();
 test('recipes API', { skip }, async (t) => {
   const { buildServer } = await import('../src/api/server.js');
   const { close } = await import('../src/db.js');
+  const { setJwksForTesting } = await import('../src/api/auth.js');
+  installTestJwks(setJwksForTesting);
   const app = await buildServer();
 
   t.after(async () => {
