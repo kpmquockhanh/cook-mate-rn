@@ -21,8 +21,8 @@ const log = logger('connectivity');
  * failed while offline load themselves again without the user pulling to
  * refresh.
  *
- * Offline vs server-down: when /health cannot be reached at all, Supabase is
- * tried too. If Supabase answers, the network is fine and it is our server
+ * Offline vs server-down: when /health cannot be reached at all, the storage
+ * host is tried too. If it answers, the network is fine and it is our server
  * that is down; if neither answers, the device is offline. The two get
  * different wording because they ask different things of the user.
  */
@@ -158,12 +158,12 @@ async function probe(): Promise<void> {
       return;
     }
 
-    // Any HTTP answer from Supabase proves the network works. The auth health
-    // endpoint needs the apikey header on some setups, so a 401 still counts.
+    // Any HTTP answer from the storage host proves the network works, so even
+    // a 400/401/404 counts.
     const networkUp =
       Platform.OS === 'web' && typeof navigator !== 'undefined' && navigator.onLine === false
         ? false
-        : await reachable(`${env.supabaseUrl}/auth/v1/health`, () => true);
+        : await reachable(env.storageUrl, () => true);
 
     backoffMs = Math.min(backoffMs * 2, BACKOFF_MAX_MS);
     setState({ status: networkUp ? 'server-down' : 'offline', checking: false });

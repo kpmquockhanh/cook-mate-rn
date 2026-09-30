@@ -4,6 +4,10 @@
     "strict": true,
     "jsx": "react-jsx",
 
+    // TypeScript 6 no longer auto-includes @types/*. Node's types are needed by
+    // the node:test suites and by `NodeJS.Timeout` in timer code.
+    "types": ["node"],
+
     // Root-relative imports (`components/RecipeCard`, `hooks/useRecipes`).
     // This used to be a bare `baseUrl: "."`, which TypeScript 6 deprecates and
     // 7 removes. Explicit `paths` with no baseUrl is the replacement, and

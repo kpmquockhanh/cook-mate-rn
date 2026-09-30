@@ -20,7 +20,7 @@ export interface Logger {
 
 /**
  * React Native's console prints a plain object as `[object Object]`, which is
- * exactly the shape most Supabase and LiveKit errors arrive in. Errors pass
+ * exactly the shape most Clerk and LiveKit errors arrive in. Errors pass
  * through untouched because the console does render those with their stack.
  */
 function readable(extra: unknown): unknown {

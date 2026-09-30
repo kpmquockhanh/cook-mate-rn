@@ -11,7 +11,7 @@
  *      these into a loop.
  *   2. A missing variable is reported with every other missing variable, at
  *      startup, naming the file to fix. The previous behaviour was a non-null
- *      assertion in lib/supabase.ts that turned a blank .env into an opaque
+ *      assertion in the old Supabase client that turned a blank .env into an opaque
  *      failure deep inside a request.
  *
  * Nothing secret belongs here: EXPO_PUBLIC_* values ship inside the JS bundle
@@ -20,8 +20,6 @@
  */
 
 const raw = {
-  supabaseUrl: process.env.EXPO_PUBLIC_SUPABASE_URL,
-  supabasePublishableKey: process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
   clerkPublishableKey: process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY,
   apiUrl: process.env.EXPO_PUBLIC_API_URL,
   storageUrl: process.env.EXPO_PUBLIC_STORAGE_URL,
@@ -31,8 +29,6 @@ const raw = {
 
 /** The variables the app cannot start without, paired with their env names. */
 const REQUIRED = {
-  supabaseUrl: 'EXPO_PUBLIC_SUPABASE_URL',
-  supabasePublishableKey: 'EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY',
   clerkPublishableKey: 'EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY',
   apiUrl: 'EXPO_PUBLIC_API_URL',
   storageUrl: 'EXPO_PUBLIC_STORAGE_URL',
@@ -55,8 +51,6 @@ if (missing.length > 0) {
 const trimSlash = (value: string) => value.replace(/\/$/, '');
 
 export const env = {
-  supabaseUrl: raw.supabaseUrl as string,
-  supabasePublishableKey: raw.supabasePublishableKey as string,
   clerkPublishableKey: raw.clerkPublishableKey as string,
   apiUrl: trimSlash(raw.apiUrl as string),
   storageUrl: trimSlash(raw.storageUrl as string),

@@ -414,7 +414,6 @@ const en = {
   'voice.detailMicBlocked': 'The browser blocked the microphone',
   'voice.detailMicFailure': 'Microphone unavailable ({reason})',
   'voice.detailUnreachable': 'Could not reach the voice service',
-  'voice.detailHttp': 'Voice service returned HTTP {status}',
   'voice.detailTokenFailed': 'Could not start the voice assistant',
   'voice.detailIncompleteToken': 'The voice service sent an incomplete response',
 

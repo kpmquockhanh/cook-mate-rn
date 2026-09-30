@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-// REST API via EXPO_PUBLIC_API_URL. apiFetch attaches the caller's Supabase
-// access token - the API rejects an unauthenticated read with a 401.
+// REST API via EXPO_PUBLIC_API_URL. apiFetch attaches the caller's Clerk
+// session token - the API rejects an unauthenticated read with a 401.
 import { apiFetch, isConnectionError } from '../lib/api';
 import { onReconnect } from '../lib/connectivity';
 import { useLanguage } from '../lib/i18n';

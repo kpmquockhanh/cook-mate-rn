@@ -386,7 +386,6 @@ const vi: Record<TranslationKey, Phrase> = {
   'voice.detailMicBlocked': 'Trình duyệt đã chặn micro',
   'voice.detailMicFailure': 'Không dùng được micro ({reason})',
   'voice.detailUnreachable': 'Không kết nối được dịch vụ giọng nói',
-  'voice.detailHttp': 'Dịch vụ giọng nói trả về HTTP {status}',
   'voice.detailTokenFailed': 'Không khởi động được trợ lý giọng nói',
   'voice.detailIncompleteToken': 'Dịch vụ giọng nói trả về dữ liệu không đầy đủ',
 

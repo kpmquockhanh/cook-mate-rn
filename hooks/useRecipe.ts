@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-// apiFetch attaches the caller's Supabase access token; the API 401s without it.
+// apiFetch attaches the caller's Clerk session token; the API 401s without it.
 import { ApiError, apiFetch, isConnectionError } from '../lib/api';
 import { onReconnect } from '../lib/connectivity';
 import { useLanguage } from '../lib/i18n';
