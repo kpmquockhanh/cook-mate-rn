@@ -52,7 +52,7 @@ export function s3Client(): S3Like {
     ].filter(Boolean);
     throw new Error(
       `Object storage is not configured: set ${missing.join(', ')}. ` +
-        'For local crawling without an object store, set RAW_PAGE_STORE=file. See backend/.env.example.',
+        'For local crawling without an object store, set RAW_PAGE_STORE=file. See backend/.env.example.'
     );
   }
 
@@ -73,18 +73,38 @@ function isNotFound(error: unknown, ...names: string[]): boolean {
   return status(error) === 404 || names.includes((error as Error)?.name);
 }
 
-/** Rethrown with enough context to find the object, keeping the SDK error as `cause`. */
-function storageError(operation: string, bucket: string, key: string | null, error: unknown): Error {
+/**
+ * Rethrown with enough context to find the object and the cause, keeping the
+ * SDK error as `cause`. Network failures arrive as a plain `Error` (often with
+ * an empty message) whose only useful part is `code`, e.g. ECONNREFUSED when
+ * MinIO is not running - so the name alone is not enough.
+ */
+function storageError(
+  operation: string,
+  bucket: string,
+  key: string | null,
+  error: unknown
+): Error {
   const target = key ? `${bucket}/${key}` : bucket;
-  const reason = (error as Error)?.name || String(error);
+  const { name, message, code } = (error ?? {}) as {
+    name?: string;
+    message?: string;
+    code?: string;
+  };
+  const parts = [name !== 'Error' && name, code, message !== name && message].filter(Boolean);
+  const httpStatus = status(error);
+  const reason = (parts.join(': ') || String(error)) + (httpStatus ? ` (HTTP ${httpStatus})` : '');
   return new Error(`S3 ${operation} ${target} failed: ${reason}`, { cause: error });
 }
+
+/** Every call gets a deadline: the SDK has none by default, and a hung store would stall a run forever. */
+const deadline = () => ({ abortSignal: AbortSignal.timeout(env.crawlTimeoutMs) });
 
 export async function putObject(
   bucket: string,
   key: string,
   body: Uint8Array,
-  options: { contentType: string; cacheControl?: string },
+  options: { contentType: string; cacheControl?: string }
 ): Promise<void> {
   try {
     // Content-addressed keys mean a repeat write is the same bytes, so the
@@ -97,7 +117,7 @@ export async function putObject(
         ContentType: options.contentType,
         CacheControl: options.cacheControl,
       }),
-      { abortSignal: AbortSignal.timeout(env.crawlTimeoutMs) },
+      deadline()
     );
   } catch (error) {
     throw storageError('PutObject', bucket, key, error);
@@ -107,9 +127,10 @@ export async function putObject(
 /** The object's bytes, or null when there is no such object. */
 export async function getObject(bucket: string, key: string): Promise<Uint8Array | null> {
   try {
-    const response = (await s3Client().send(new GetObjectCommand({ Bucket: bucket, Key: key }), {
-      abortSignal: AbortSignal.timeout(env.crawlTimeoutMs),
-    })) as { Body?: { transformToByteArray(): Promise<Uint8Array> } };
+    const response = (await s3Client().send(
+      new GetObjectCommand({ Bucket: bucket, Key: key }),
+      deadline()
+    )) as { Body?: { transformToByteArray(): Promise<Uint8Array> } };
     if (!response.Body) return null;
     return await response.Body.transformToByteArray();
   } catch (error) {
@@ -154,7 +175,13 @@ function grantsPublicRead(policy: string, bucket: string): boolean {
     return false;
   }
   return statements.some((raw) => {
-    const statement = raw as { Effect?: string; Principal?: unknown; Action?: unknown; Resource?: unknown };
+    if (!raw || typeof raw !== 'object') return false; // e.g. `{}`, a policy with no Statement
+    const statement = raw as {
+      Effect?: string;
+      Principal?: unknown;
+      Action?: unknown;
+      Resource?: unknown;
+    };
     const principal = statement.Principal;
     const anyone =
       principal === '*' || asList((principal as { AWS?: unknown } | undefined)?.AWS).includes('*');
@@ -168,16 +195,20 @@ function grantsPublicRead(policy: string, bucket: string): boolean {
 }
 
 /** Create the bucket if it is missing; for a public one, make sure anyone can read it. */
-export async function ensureBucket(bucket: string, options: { public: boolean }): Promise<BucketReport> {
+export async function ensureBucket(
+  bucket: string,
+  options: { public: boolean }
+): Promise<BucketReport> {
   const s3 = s3Client();
 
   let created = false;
   try {
-    await s3.send(new HeadBucketCommand({ Bucket: bucket }));
+    await s3.send(new HeadBucketCommand({ Bucket: bucket }), deadline());
   } catch (error) {
-    if (!isNotFound(error, 'NotFound', 'NoSuchBucket')) throw storageError('HeadBucket', bucket, null, error);
+    if (!isNotFound(error, 'NotFound', 'NoSuchBucket'))
+      throw storageError('HeadBucket', bucket, null, error);
     try {
-      await s3.send(new CreateBucketCommand({ Bucket: bucket }));
+      await s3.send(new CreateBucketCommand({ Bucket: bucket }), deadline());
     } catch (createError) {
       throw storageError('CreateBucket', bucket, null, createError);
     }
@@ -188,7 +219,10 @@ export async function ensureBucket(bucket: string, options: { public: boolean })
 
   if (created) {
     try {
-      await s3.send(new PutBucketPolicyCommand({ Bucket: bucket, Policy: publicReadPolicy(bucket) }));
+      await s3.send(
+        new PutBucketPolicyCommand({ Bucket: bucket, Policy: publicReadPolicy(bucket) }),
+        deadline()
+      );
     } catch (error) {
       throw storageError('PutBucketPolicy', bucket, null, error);
     }
@@ -196,7 +230,10 @@ export async function ensureBucket(bucket: string, options: { public: boolean })
   }
 
   try {
-    const { Policy } = (await s3.send(new GetBucketPolicyCommand({ Bucket: bucket }))) as { Policy?: string };
+    const { Policy } = (await s3.send(
+      new GetBucketPolicyCommand({ Bucket: bucket }),
+      deadline()
+    )) as { Policy?: string };
     return { created, publicPolicy: Policy && grantsPublicRead(Policy, bucket) ? 'ok' : 'missing' };
   } catch (error) {
     if (isNotFound(error, 'NoSuchBucketPolicy')) return { created, publicPolicy: 'missing' };

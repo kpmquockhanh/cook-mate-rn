@@ -64,7 +64,9 @@ test('putObject sends the bucket, key, body, content type and cache control', as
 
 test('reads and writes carry an abort signal, so a hung store cannot stall a run', async () => {
   const sent = fakeClient(() => ({ Body: { transformToByteArray: async () => new Uint8Array() } }));
-  await s3.putObject('raw-pages', 'aa/x.html.gz', new Uint8Array(), { contentType: 'application/gzip' });
+  await s3.putObject('raw-pages', 'aa/x.html.gz', new Uint8Array(), {
+    contentType: 'application/gzip',
+  });
   await s3.getObject('raw-pages', 'aa/x.html.gz');
   assert.ok(sent.options[0]?.abortSignal instanceof AbortSignal);
   assert.ok(sent.options[1]?.abortSignal instanceof AbortSignal);
@@ -100,16 +102,18 @@ test('any other failure is rethrown naming the operation, bucket, key and error'
   });
 
   await assert.rejects(
-    s3.putObject('raw-pages', 'aa/x.html.gz', new Uint8Array(), { contentType: 'application/gzip' }),
+    s3.putObject('raw-pages', 'aa/x.html.gz', new Uint8Array(), {
+      contentType: 'application/gzip',
+    }),
     (error: Error) => {
       assert.match(error.message, /S3 PutObject raw-pages\/aa\/x\.html\.gz failed: AccessDenied/);
       assert.equal(error.cause, original);
       return true;
-    },
+    }
   );
   await assert.rejects(
     s3.getObject('raw-pages', 'aa/x.html.gz'),
-    /S3 GetObject raw-pages\/aa\/x\.html\.gz failed: AccessDenied/,
+    /S3 GetObject raw-pages\/aa\/x\.html\.gz failed: AccessDenied/
   );
 });
 
@@ -165,7 +169,12 @@ test('a new public bucket gets a policy allowing anonymous GetObject and nothing
 test('an existing public bucket with the read grant reports ok, in either policy spelling', async () => {
   // The second form is how MinIO stores what `mc anonymous set download` writes.
   for (const statement of [
-    { Effect: 'Allow', Principal: '*', Action: 's3:GetObject', Resource: 'arn:aws:s3:::recipe-images/*' },
+    {
+      Effect: 'Allow',
+      Principal: '*',
+      Action: 's3:GetObject',
+      Resource: 'arn:aws:s3:::recipe-images/*',
+    },
     {
       Effect: 'Allow',
       Principal: { AWS: ['*'] },
@@ -176,7 +185,7 @@ test('an existing public bucket with the read grant reports ok, in either policy
     const sent = fakeClient((command) =>
       command instanceof GetBucketPolicyCommand
         ? { Policy: JSON.stringify({ Version: '2012-10-17', Statement: [statement] }) }
-        : {},
+        : {}
     );
     assert.deepEqual(await s3.ensureBucket('recipe-images', { public: true }), {
       created: false,
@@ -204,11 +213,16 @@ test('an existing public bucket without the grant reports missing and writes not
       ? {
           Policy: JSON.stringify({
             Statement: [
-              { Effect: 'Allow', Principal: '*', Action: 's3:GetObject', Resource: 'arn:aws:s3:::other/*' },
+              {
+                Effect: 'Allow',
+                Principal: '*',
+                Action: 's3:GetObject',
+                Resource: 'arn:aws:s3:::other/*',
+              },
             ],
           }),
         }
-      : {},
+      : {}
   );
   assert.equal((await s3.ensureBucket('recipe-images', { public: true })).publicPolicy, 'missing');
 });
@@ -222,7 +236,7 @@ test('without an injected client, missing configuration names every missing vari
       assert.match(error.message, /S3_SECRET_ACCESS_KEY/);
       assert.match(error.message, /RAW_PAGE_STORE=file/);
       return true;
-    },
+    }
   );
 
   process.env.S3_ENDPOINT = 'http://localhost:9000';
@@ -234,10 +248,64 @@ test('without an injected client, missing configuration names every missing vari
         assert.doesNotMatch(error.message, /S3_ENDPOINT/);
         assert.match(error.message, /S3_SECRET_ACCESS_KEY/);
         return true;
-      },
+      }
     );
   } finally {
     process.env.S3_ENDPOINT = '';
     process.env.S3_ACCESS_KEY_ID = '';
   }
+});
+
+test('every ensureBucket call carries an abort signal, so a hung store cannot stall setup or a run', async () => {
+  const created = fakeClient((command) => {
+    if (command instanceof HeadBucketCommand) throw sdkError('NotFound', 404);
+    return {};
+  });
+  await s3.ensureBucket('recipe-images', { public: true });
+  assert.equal(created.length, 3); // HeadBucket, CreateBucket, PutBucketPolicy
+  for (const options of created.options) assert.ok(options?.abortSignal instanceof AbortSignal);
+
+  const existing = fakeClient((command) =>
+    command instanceof GetBucketPolicyCommand ? { Policy: '{}' } : {}
+  );
+  await s3.ensureBucket('recipe-images', { public: true });
+  assert.equal(existing.length, 2); // HeadBucket, GetBucketPolicy
+  for (const options of existing.options) assert.ok(options?.abortSignal instanceof AbortSignal);
+});
+
+test('a network failure keeps its code and message, not just the generic name "Error"', async () => {
+  // What the SDK surfaces when nothing listens on the endpoint: a plain Error
+  // (often an AggregateError with an empty message) carrying only a code.
+  fakeClient(() => {
+    throw Object.assign(new AggregateError([], ''), { name: 'Error', code: 'ECONNREFUSED' });
+  });
+  await assert.rejects(
+    s3.ensureBucket('raw-pages', { public: false }),
+    /HeadBucket raw-pages failed: ECONNREFUSED/
+  );
+
+  fakeClient(() => {
+    throw Object.assign(new Error('socket hang up'), { code: 'ECONNRESET' });
+  });
+  await assert.rejects(
+    s3.getObject('raw-pages', 'aa/x.html.gz'),
+    /GetObject raw-pages\/aa\/x\.html\.gz failed: ECONNRESET: socket hang up/
+  );
+});
+
+test('an SDK error message names its HTTP status', async () => {
+  fakeClient(() => {
+    throw sdkError('AccessDenied', 403);
+  });
+  await assert.rejects(
+    s3.putObject('raw-pages', 'aa/x.html.gz', new Uint8Array(), {
+      contentType: 'application/gzip',
+    }),
+    /failed: AccessDenied \(HTTP 403\)/
+  );
+});
+
+test('a policy with no statements reads as missing, not as a failed request', async () => {
+  fakeClient((command) => (command instanceof GetBucketPolicyCommand ? { Policy: '{}' } : {}));
+  assert.equal((await s3.ensureBucket('recipe-images', { public: true })).publicPolicy, 'missing');
 });
