@@ -161,6 +161,13 @@ export const env = {
     .map((origin) => origin.trim().replace(/\/$/, ''))
     .filter(Boolean),
 
+  // ---- Voice (src/api/routes/voice.ts) ----
+  // Used to mint per-user LiveKit room tokens. Optional so the API still serves
+  // recipes without them; /voice/token answers 500 until they are set.
+  livekitUrl: process.env.LIVEKIT_URL,
+  livekitApiKey: process.env.LIVEKIT_API_KEY,
+  livekitApiSecret: process.env.LIVEKIT_API_SECRET,
+
   // ---- Raw page storage (src/storage/pages.ts) ----
   // Crawled HTML lives in object storage, not in a Postgres column: it is the
   // largest thing the pipeline keeps and the least often read.

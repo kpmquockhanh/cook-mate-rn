@@ -6,6 +6,7 @@ import { env } from '../env.js';
 import { logger } from '../log.js';
 import { registerAuth } from './auth.js';
 import { recipeRoutes } from './routes/recipes.js';
+import { voiceRoutes } from './routes/voice.js';
 
 const log = logger('api');
 
@@ -61,6 +62,7 @@ export async function buildServer(): Promise<FastifyInstance> {
   });
 
   await app.register(recipeRoutes);
+  await app.register(voiceRoutes);
 
   return app;
 }
