@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { FunctionsHttpError } from '@supabase/supabase-js';
-import { supabase } from './supabase';
+import { apiFetch, ApiError } from './api';
 import { errorMessage, logger } from './log';
 import { t } from './i18n/translate';
 
@@ -22,22 +21,9 @@ function isUsable(creds: LiveKitCredentials | null): creds is LiveKitCredentials
   return !!creds && creds.expiresAt - Date.now() > REFRESH_MARGIN_MS;
 }
 
-/**
- * supabase-js collapses every non-2xx edge function response into the same
- * "Edge Function returned a non-2xx status code", which is useless in a log and
- * worse on screen. The real reason is in the response body the error carries.
- */
-async function describeFunctionError(error: unknown): Promise<string> {
-  if (error instanceof FunctionsHttpError) {
-    const status = error.context?.status;
-    try {
-      const body = await error.context.json();
-      if (typeof body?.error === 'string') return `${body.error} (HTTP ${status})`;
-    } catch {
-      // A non-JSON body is not worth failing the error path over.
-    }
-    return t('voice.detailHttp', { status: status ?? 'error' });
-  }
+/** The API's error text plus the status, which is what a bug report needs. */
+function describeTokenError(error: unknown): string {
+  if (error instanceof ApiError) return `${error.message} (HTTP ${error.status})`;
   return errorMessage(error, t('voice.detailTokenFailed'));
 }
 
@@ -49,9 +35,9 @@ export interface UseLiveKitTokenResult {
 }
 
 /**
- * Fetches a per-user, per-recipe LiveKit token from the `livekit-token` edge
- * function. The room and identity are decided server-side from the caller's
- * Supabase session, so two users never land in the same room.
+ * Fetches a per-user, per-recipe LiveKit token from the API (`POST /voice/token`).
+ * The room and identity are decided server-side from the caller's Clerk session,
+ * so two users never land in the same room.
  */
 export function useLiveKitToken(recipeId: string | null): UseLiveKitTokenResult {
   const [credentials, setCredentials] = useState<LiveKitCredentials | null>(null);
@@ -72,12 +58,11 @@ export function useLiveKitToken(recipeId: string | null): UseLiveKitTokenResult 
     log.info(`Requesting credentials for recipe ${recipeId}`);
 
     try {
-      const { data, error: fnError } = await supabase.functions.invoke<LiveKitCredentials>(
-        'livekit-token',
-        { body: { recipeId } }
-      );
-
-      if (fnError) throw fnError;
+      const data = await apiFetch<LiveKitCredentials>('/voice/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ recipeId }),
+      });
       if (!data?.token || !data?.serverUrl) {
         throw new Error(t('voice.detailIncompleteToken'));
       }
@@ -91,7 +76,7 @@ export function useLiveKitToken(recipeId: string | null): UseLiveKitTokenResult 
       setCredentials(data);
       setError(null);
     } catch (e) {
-      const message = await describeFunctionError(e);
+      const message = describeTokenError(e);
       log.error(`Could not fetch a token for recipe ${recipeId}: ${message}`, e);
       if (id !== requestId.current) return;
       setCredentials(null);

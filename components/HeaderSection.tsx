@@ -11,7 +11,7 @@ export default function HeaderSection() {
 
   // The name set in Settings wins; the email prefix is only a stand-in for
   // accounts that never set one.
-  const displayName = (user?.user_metadata?.display_name as string | undefined)?.trim();
+  const displayName = user?.displayName;
   const greetingName =
     displayName || user?.email?.split('@')[0] || t('home.greetingFallbackName');
 

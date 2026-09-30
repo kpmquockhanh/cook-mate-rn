@@ -1,75 +1,60 @@
-import React, { createContext, useContext, useEffect, useState } from 'react'
-import { supabase } from './supabase'
-import type { User, Session } from '@supabase/supabase-js'
+import React, { createContext, useContext, useEffect } from 'react';
+import { useAuth as useClerkAuth, useClerk, useUser } from '@clerk/expo';
+import { registerTokenGetter } from './authToken';
+import { authGateState, toAppUser, type AppUser } from './authUser';
 
 type AuthContextType = {
-  user: User | null
-  session: Session | null
-  loading: boolean
-  signOut: () => Promise<void>
-}
+  user: AppUser | null;
+  loading: boolean;
+  signOut: () => Promise<void>;
+  /** Stored in Clerk's unsafeMetadata.display_name; the user object updates itself. */
+  updateDisplayName: (name: string) => Promise<void>;
+};
 
-const AuthContext = createContext<AuthContextType>({
-  user: null,
-  session: null,
-  loading: true,
-  signOut: async () => {},
-})
+const AuthContext = createContext<AuthContextType | null>(null);
 
 export const useAuth = () => {
-  const context = useContext(AuthContext)
+  const context = useContext(AuthContext);
   if (!context) {
-    throw new Error('useAuth must be used within an AuthProvider')
+    throw new Error('useAuth must be used within an AuthProvider');
   }
-  return context
-}
+  return context;
+};
 
 type AuthProviderProps = {
-  children: React.ReactNode
-}
+  children: React.ReactNode;
+};
 
+/**
+ * Wraps Clerk behind the app's own auth shape, so screens never import Clerk.
+ * Must sit inside ClerkProvider (app/_layout.tsx).
+ */
 export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
-  const [user, setUser] = useState<User | null>(null)
-  const [session, setSession] = useState<Session | null>(null)
-  const [loading, setLoading] = useState(true)
+  const { isLoaded, isSignedIn, getToken } = useClerkAuth();
+  const { user: clerkUser } = useUser();
+  const clerk = useClerk();
 
+  // apiFetch is plain code outside React; this is how it gets tokens.
   useEffect(() => {
-    // Get initial session
-    const getInitialSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession()
-      setSession(session)
-      setUser(session?.user ?? null)
-      setLoading(false)
-    }
+    registerTokenGetter((options) => getToken(options));
+    return () => registerTokenGetter(null);
+  }, [getToken]);
 
-    getInitialSession()
+  const gate = authGateState({ isLoaded, isSignedIn, hasUser: !!clerkUser });
 
-    // Listen for auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
-        setSession(session)
-        setUser(session?.user ?? null)
-        setLoading(false)
-      }
-    )
+  const value: AuthContextType = {
+    user: gate === 'signedIn' ? toAppUser(clerkUser) : null,
+    loading: gate === 'loading',
+    signOut: async () => {
+      await clerk.signOut();
+    },
+    updateDisplayName: async (name: string) => {
+      if (!clerkUser) return;
+      await clerkUser.update({
+        unsafeMetadata: { ...clerkUser.unsafeMetadata, display_name: name },
+      });
+    },
+  };
 
-    return () => subscription.unsubscribe()
-  }, [])
-
-  const signOut = async () => {
-    await supabase.auth.signOut()
-  }
-
-  const value = {
-    user,
-    session,
-    loading,
-    signOut,
-  }
-
-  return (
-    <AuthContext.Provider value={value}>
-      {children}
-    </AuthContext.Provider>
-  )
-}
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+};

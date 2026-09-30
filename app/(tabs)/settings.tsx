@@ -22,7 +22,6 @@ import {
   SPEECH_RATE_RANGE,
   WAKE_WINDOW_CHOICES,
 } from '../../lib/SettingsContext';
-import { supabase } from '../../lib/supabase';
 import { confirmAction, notify } from '../../utils/confirm';
 import { errorMessage } from '../../lib/log';
 import {
@@ -45,11 +44,11 @@ function formatPreAlert(seconds: number, t: Translator): string {
 
 export default function Settings() {
   const { t } = useTranslation();
-  const { signOut, user } = useAuth();
+  const { signOut, user, updateDisplayName } = useAuth();
   const { items: shoppingItems, clearStorage } = useShopping();
   const { settings, isLoaded, updateSetting, resetSettings } = useSettings();
 
-  const storedName = (user?.user_metadata?.display_name as string | undefined) ?? '';
+  const storedName = user?.displayName ?? '';
   const [nameModalOpen, setNameModalOpen] = useState(false);
   const [nameDraft, setNameDraft] = useState(storedName);
   const [savingName, setSavingName] = useState(false);
@@ -73,10 +72,9 @@ export default function Settings() {
     const next = nameDraft.trim();
     setSavingName(true);
     try {
-      // The auth listener in AuthContext picks the updated user up from the
-      // USER_UPDATED event, so nothing here has to write it back into state.
-      const { error } = await supabase.auth.updateUser({ data: { display_name: next } });
-      if (error) throw error;
+      // Clerk re-renders AuthContext with the updated user, so nothing here
+      // has to write it back into state.
+      await updateDisplayName(next);
       setNameModalOpen(false);
     } catch (error) {
       notify(t('settings.nameSaveError'), errorMessage(error, t('common.tryAgain')));

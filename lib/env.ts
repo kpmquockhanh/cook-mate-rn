@@ -15,12 +15,14 @@
  *      failure deep inside a request.
  *
  * Nothing secret belongs here: EXPO_PUBLIC_* values ship inside the JS bundle
- * and are readable by anyone with the app. RLS is what guards the data.
+ * and are readable by anyone with the app. The API's token check is what guards
+ * the data.
  */
 
 const raw = {
   supabaseUrl: process.env.EXPO_PUBLIC_SUPABASE_URL,
   supabasePublishableKey: process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
+  clerkPublishableKey: process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY,
   apiUrl: process.env.EXPO_PUBLIC_API_URL,
   storageUrl: process.env.EXPO_PUBLIC_STORAGE_URL,
   devEmail: process.env.EXPO_PUBLIC_DEV_EMAIL,
@@ -31,6 +33,7 @@ const raw = {
 const REQUIRED = {
   supabaseUrl: 'EXPO_PUBLIC_SUPABASE_URL',
   supabasePublishableKey: 'EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY',
+  clerkPublishableKey: 'EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY',
   apiUrl: 'EXPO_PUBLIC_API_URL',
   storageUrl: 'EXPO_PUBLIC_STORAGE_URL',
 } as const;
@@ -54,6 +57,7 @@ const trimSlash = (value: string) => value.replace(/\/$/, '');
 export const env = {
   supabaseUrl: raw.supabaseUrl as string,
   supabasePublishableKey: raw.supabasePublishableKey as string,
+  clerkPublishableKey: raw.clerkPublishableKey as string,
   apiUrl: trimSlash(raw.apiUrl as string),
   storageUrl: trimSlash(raw.storageUrl as string),
 

@@ -1,4 +1,4 @@
-import { supabase } from './supabase';
+import { sendWithAuthRetry } from './authToken';
 import { env } from './env';
 import { t } from './i18n/translate';
 import { isOnline, reportReachable, reportUnreachable } from './connectivity';
@@ -6,7 +6,7 @@ import { isOnline, reportReachable, reportUnreachable } from './connectivity';
 /**
  * The single way the app talks to the REST API (backend/src/api).
  *
- * Every route there except /health is behind a Supabase access token now, so a
+ * Every route there except /health is behind a Clerk session token now, so a
  * bare `fetch` to EXPO_PUBLIC_API_URL gets a 401. Going through here keeps the
  * token attachment and the refresh-and-retry in one place instead of copied
  * into each hook.
@@ -75,16 +75,6 @@ export interface ApiFetchInit extends RequestInit {
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
- * getSession() refreshes on its own when the stored token is past expiry, so
- * this is normally the only token call needed. It reads from AsyncStorage, so
- * it is async even when nothing is refreshed.
- */
-async function accessToken(): Promise<string | null> {
-  const { data } = await supabase.auth.getSession();
-  return data.session?.access_token ?? null;
-}
-
-/**
  * One fetch, with the token attached and a timeout, telling the connectivity
  * store whenever the API does answer. A transport failure
  * becomes a ConnectionError; a caller's own abort is rethrown as-is.
@@ -129,7 +119,7 @@ async function request(path: string, init: RequestInit, token: string | null): P
  * Fetches an API path with the caller's session attached and the JSON body
  * unwrapped from the `{ data }` envelope the API returns.
  *
- * A 401 is retried exactly once against a force-refreshed session: a token can
+ * A 401 is retried exactly once with a freshly minted Clerk token: a token can
  * expire in the gap between reading it and the server verifying it, and the
  * alternative is a spurious error screen on a session that is perfectly valid.
  *
@@ -160,18 +150,10 @@ export async function apiFetch<T = unknown>(path: string, init: ApiFetchInit = {
 }
 
 async function attemptFetch<T>(path: string, init: RequestInit): Promise<T> {
-  let response = await request(path, init, await accessToken());
-
-  if (response.status === 401) {
-    const { data, error } = await supabase.auth.refreshSession();
-    // No refresh token, or the server rejected it: the session is genuinely
-    // gone. Surface it rather than looping - AuthContext's onAuthStateChange
-    // is what routes the user back to sign-in.
-    if (error || !data.session) {
-      throw await apiError(response);
-    }
-    response = await request(path, init, data.session.access_token);
-  }
+  // One retry on a 401 with a freshly minted token (see authToken.ts). A second
+  // 401 surfaces as an error; AuthContext is what routes a signed-out user back
+  // to the sign-in screen.
+  const response = await sendWithAuthRetry((token) => request(path, init, token));
 
   if (!response.ok) throw await apiError(response);
 

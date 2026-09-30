@@ -2,6 +2,9 @@ import type { ReactNode } from 'react';
 import { View, ActivityIndicator, Platform, StyleSheet, LogBox } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { ClerkProvider } from '@clerk/expo';
+import { tokenCache } from '@clerk/expo/token-cache';
+import { env } from '../lib/env';
 import { AuthProvider, useAuth } from '../lib/AuthContext';
 import { SettingsProvider } from '../lib/SettingsContext';
 import { ShoppingProvider } from '../lib/ShoppingContext';
@@ -75,21 +78,25 @@ export default function RootLayout() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <WebMobileViewport>
         <SafeAreaProvider>
-          <AuthProvider>
-            {/* Outside ShoppingProvider and TimerProvider because both the
-                timers and the screens they feed read preferences from it. */}
-            <SettingsProvider>
-              <ShoppingProvider>
-                {/* Inside AuthProvider: every favourite belongs to a signed-in
-                    user, and the API rejects the write without a session. */}
-                <FavoritesProvider>
-                  <TimerProvider>
-                    <RootLayoutNav />
-                  </TimerProvider>
-                </FavoritesProvider>
-              </ShoppingProvider>
-            </SettingsProvider>
-          </AuthProvider>
+          {/* Outermost auth layer: AuthProvider reads Clerk's hooks. The token
+              cache keeps the session in expo-secure-store across launches. */}
+          <ClerkProvider publishableKey={env.clerkPublishableKey} tokenCache={tokenCache}>
+            <AuthProvider>
+              {/* Outside ShoppingProvider and TimerProvider because both the
+                  timers and the screens they feed read preferences from it. */}
+              <SettingsProvider>
+                <ShoppingProvider>
+                  {/* Inside AuthProvider: every favourite belongs to a signed-in
+                      user, and the API rejects the write without a session. */}
+                  <FavoritesProvider>
+                    <TimerProvider>
+                      <RootLayoutNav />
+                    </TimerProvider>
+                  </FavoritesProvider>
+                </ShoppingProvider>
+              </SettingsProvider>
+            </AuthProvider>
+          </ClerkProvider>
         </SafeAreaProvider>
       </WebMobileViewport>
     </GestureHandlerRootView>
