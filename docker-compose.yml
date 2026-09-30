@@ -3,18 +3,48 @@
 # `npm start` / Expo Go / a device build), not a service to containerize.
 #
 # Usage:
+#   cp .env.example .env                   # MINIO_ROOT_USER / MINIO_ROOT_PASSWORD
+#                                           # (compose reads the root .env)
 #   cp backend/.env.example backend/.env   # fill in DATABASE_URL, provider keys,
-#                                           # SUPABASE_URL, REVIEW_USERNAME/PASSWORD,
+#                                           # S3_ACCESS_KEY_ID/S3_SECRET_ACCESS_KEY
+#                                           # (the MinIO credentials), S3_PUBLIC_URL,
+#                                           # REVIEW_USERNAME/PASSWORD,
 #                                           # CLERK_ISSUER, CLERK_AUTHORIZED_PARTIES,
 #                                           # LIVEKIT_URL/_API_KEY/_API_SECRET (voice tokens)
 #   cp agent/.env.example agent/.env       # fill in LIVEKIT_*
 #   docker compose up --build
 
 services:
+  # Object storage for crawled pages and recipe images (S3 API on 9000, web
+  # console on 9001). The backend creates its buckets itself: run
+  # `npm run dev -- storage check` and `npm run dev -- images --check`.
+  #
+  # MinIO no longer publishes images (minio/minio is gone from Docker Hub);
+  # pgsty/minio is the Pigsty project's build of the same server. Pinned:
+  # bump the tag deliberately.
+  minio:
+    image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER in the root .env}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in the root .env}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+    restart: unless-stopped
+
   api:
     build: ./backend
     command: ["npm", "run", "api"]
     env_file: ./backend/.env
+    environment:
+      # localhost inside a container is the container itself. S3_PUBLIC_URL
+      # is not overridden: it has to be an address the phone can reach.
+      S3_ENDPOINT: http://minio:9000
+    depends_on:
+      - minio
     ports:
       - "8787:8787"
     restart: unless-stopped
@@ -30,6 +60,9 @@ services:
       # because startConsole() refuses to run without REVIEW_USERNAME/
       # REVIEW_PASSWORD (see backend/src/ui/server.ts).
       REVIEW_HOST: "0.0.0.0"
+      S3_ENDPOINT: http://minio:9000
+    depends_on:
+      - minio
     ports:
       - "5174:5174"
     restart: unless-stopped
@@ -48,3 +81,6 @@ services:
     ports:
       - "8082:8082"
     restart: unless-stopped
+
+volumes:
+  minio-data:
