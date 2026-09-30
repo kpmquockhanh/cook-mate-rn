@@ -168,21 +168,44 @@ export const env = {
   livekitApiKey: process.env.LIVEKIT_API_KEY,
   livekitApiSecret: process.env.LIVEKIT_API_SECRET,
 
+  // ---- Object storage (src/storage/s3.ts) ----
+  // Raw pages and recipe images live in an S3-compatible store - MinIO from
+  // docker-compose.yml locally. Getters, so tests can change them per case.
+  //
+  // The S3 API the backend talks to, e.g. http://localhost:9000 (compose
+  // overrides it to http://minio:9000 inside its containers).
+  get s3Endpoint() {
+    return process.env.S3_ENDPOINT?.replace(/\/+$/, '') || undefined;
+  },
+  // MinIO accepts any region, but the SDK will not sign without one.
+  get s3Region() {
+    return process.env.S3_REGION || 'us-east-1';
+  },
+  get s3AccessKeyId() {
+    return process.env.S3_ACCESS_KEY_ID || undefined;
+  },
+  get s3SecretAccessKey() {
+    return process.env.S3_SECRET_ACCESS_KEY || undefined;
+  },
+  // Where clients read public objects. Differs from the endpoint when the
+  // backend reaches MinIO by a container name but a phone needs a LAN address.
+  get s3PublicUrl() {
+    return (
+      process.env.S3_PUBLIC_URL?.replace(/\/+$/, '') ||
+      process.env.S3_ENDPOINT?.replace(/\/+$/, '') ||
+      undefined
+    );
+  },
+
   // ---- Raw page storage (src/storage/pages.ts) ----
   // Crawled HTML lives in object storage, not in a Postgres column: it is the
   // largest thing the pipeline keeps and the least often read.
-  //
-  // Project URL, e.g. https://PROJECT.supabase.co. Storage only now - auth
-  // moved to Clerk. Goes away with the move to MinIO.
-  supabaseUrl: process.env.SUPABASE_URL?.replace(/\/$/, ''),
-  //
-  // The service-role key, not the publishable one - the crawler writes to a
-  // bucket the app's users have no access to.
-  supabaseServiceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY,
   rawPageBucket: process.env.RAW_PAGE_BUCKET ?? 'raw-pages',
   // `file` keeps pages on disk instead, for local work and for tests, which
-  // must not need a Supabase project to run. Deployments use the default.
-  rawPageStore: (process.env.RAW_PAGE_STORE ?? 'supabase').toLowerCase(),
+  // must not need an object store to run. Deployments use the default, `s3`.
+  get rawPageStore() {
+    return (process.env.RAW_PAGE_STORE || 's3').toLowerCase();
+  },
   rawPageDir: process.env.RAW_PAGE_DIR ?? '.raw-pages',
 
   // ---- Recipe images (src/storage/images.ts) ----
