@@ -67,18 +67,44 @@ the app loads straight from an `<Image>` with no session. `npm run dev -- images
 `EXPO_PUBLIC_STORAGE_URL` must be set to.
 
 
-Pages are kept in object storage (Supabase Storage), not in a Postgres column. `raw_pages` holds the reference and
-the content hash. They are **content-addressed and gzipped**, so the same HTML
-reached by two URLs is stored once and re-storing an unchanged page overwrites
-itself.
+Pages are kept in object storage (MinIO locally, over the S3 API), not in a
+Postgres column. `raw_pages` holds the reference and the content hash. They are
+**content-addressed and gzipped**, so the same HTML reached by two URLs is
+stored once and re-storing an unchanged page overwrites itself.
 
 ```bash
 npm run dev -- storage check        # is it reachable? creates the bucket if not
 ```
 
-Set `SUPABASE_SERVICE_ROLE_KEY` for this — the service role, not the publishable
-key, because the bucket is private. For local work with no Supabase project, set
-`RAW_PAGE_STORE=file` and pages go to `RAW_PAGE_DIR` on disk instead.
+Storage is configured with `S3_ENDPOINT`, `S3_ACCESS_KEY_ID` and
+`S3_SECRET_ACCESS_KEY` (plus optional `S3_REGION`, default `us-east-1`).
+`S3_PUBLIC_URL` is where clients read public images: set it to this machine's
+LAN address (e.g. `http://192.168.1.20:9000`) to test on a phone. It defaults
+to `S3_ENDPOINT`. Under docker compose the containers reach MinIO at
+`http://minio:9000`, so set `S3_PUBLIC_URL` there too. For local work with no
+object store, set `RAW_PAGE_STORE=file` and pages go to `RAW_PAGE_DIR` on disk
+instead.
+
+Start MinIO with `docker compose up -d minio` from the repo root, after setting
+`MINIO_ROOT_USER`/`MINIO_ROOT_PASSWORD` in the root `.env`. Its console is on
+http://localhost:9001. MinIO no longer publishes Docker images, so compose runs
+`pgsty/minio` (the Pigsty project's build of the same server), pinned to a
+release tag. The root credentials are fine for local work. Elsewhere, create an
+access key limited to the two buckets, and put MinIO behind TLS with
+`S3_PUBLIC_URL` set to its public address.
+
+**Moving from Supabase Storage** (a fresh start, nothing is copied):
+
+1. Start MinIO as above and set the `S3_*` values in `backend/.env`. Delete
+   `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`.
+2. `npm run dev -- storage check && npm run dev -- images --check` creates both
+   buckets, and the second command prints the value for the app's
+   `EXPO_PUBLIC_STORAGE_URL`.
+3. Put that value in the root `.env` and restart the Expo dev server.
+4. `npm run dev -- images --force`, then `npm run publish`, so every recipe
+   points at re-mirrored images.
+5. Raw pages need nothing: a missing object is re-fetched when the crawler
+   next needs it.
 
 **Upgrading a database that predates this**, HTML still in the column:
 
@@ -269,9 +295,11 @@ the repo root `docker-compose.yml` for how each service uses it, and the
 
 ```bash
 cp .env.example .env    # fill in DATABASE_URL, provider keys, CLERK_ISSUER,
-                         # LIVEKIT_*, SUPABASE_URL (storage), REVIEW_USERNAME/REVIEW_PASSWORD
+                         # LIVEKIT_*, S3_* (MinIO), REVIEW_USERNAME/REVIEW_PASSWORD
 cd .. && docker compose up --build api crawler
 ```
+
+The compose file also starts MinIO; its credentials come from the root `.env`.
 
 The image installs `devDependencies` too and runs via `tsx`, matching how the
 package.json scripts already run — there's no separate compiled build. The
@@ -344,9 +372,6 @@ API_HOST=0.0.0.0        # so a phone on the LAN can reach it
 API_CORS_ORIGIN=*       # set your web origin explicitly in production
 ```
 
-`SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are used for object storage only
-(raw pages and recipe images); they play no part in authentication.
-
 Three things worth knowing before you extend it:
 
 - **`orderBy` is client input.** It resolves through the `ORDER_BY` allowlist in
@@ -380,7 +405,7 @@ no re-crawling the internet.
 | 0 Crawl | `crawl` | robots.txt + per-host rate limit, conditional requests, then tier A→B→C extraction. HTML to object storage, reference to `raw_pages` |
 | 0.5 Extract | `extract` | Tier D: a model reads recipes off stored pages tiers A/B/C could not. Network-free. |
 | 1 Parse | `parse` | Deterministic: quantities, units, grams, step segmentation, canonical matching. No LLM. |
-| 1.5 Images | `images` | Downloads each recipe's photos into our own **public** Supabase bucket, so the app serves copies we hold instead of hotlinking. Skips any source without `allow_image_use`. |
+| 1.5 Images | `images` | Downloads each recipe's photos into our own **public** bucket, so the app serves copies we hold instead of hotlinking. Skips any source without `allow_image_use`. |
 | 2 Enrich | `enrich` | One Claude call per recipe: durations, timer names, step↔ingredient indices, meal, cuisine |
 | 3 Gate | `gate` | Score 0–100, dedupe by fingerprint, route to `approved` / `review` / `rejected` |
 | 4 Publish | `publish` | Writes the app's exact wire shape, including the facets it derives (meal, hands-on time, main ingredient, diet); idempotent on `url_hash` |

@@ -31,8 +31,9 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
         working-directory: backend
-      # The suite is deliberately runnable with no Supabase project and no
-      # DATABASE_URL: raw-page storage falls back to the filesystem store.
+      # The suite is deliberately runnable with no object store and no
+      # DATABASE_URL: storage tests use the filesystem driver or a fake S3
+      # client, and the live MinIO/DB tests skip themselves.
       - name: Test
         run: npm test
         working-directory: backend
