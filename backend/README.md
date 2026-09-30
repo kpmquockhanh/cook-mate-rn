@@ -55,8 +55,7 @@ the app loads straight from an `<Image>` with no session. `npm run dev -- images
 `EXPO_PUBLIC_STORAGE_URL` must be set to.
 
 
-Pages are kept in object storage (Supabase Storage, the same project as auth and
-the app tables), not in a Postgres column. `raw_pages` holds the reference and
+Pages are kept in object storage (Supabase Storage), not in a Postgres column. `raw_pages` holds the reference and
 the content hash. They are **content-addressed and gzipped**, so the same HTML
 reached by two URLs is stored once and re-storing an unchanged page overwrites
 itself.
@@ -257,8 +256,8 @@ the repo root `docker-compose.yml` for how each service uses it, and the
 [voice agent's own image](../agent) for the third service it starts.
 
 ```bash
-cp .env.example .env    # fill in DATABASE_URL, provider keys, SUPABASE_URL,
-                         # REVIEW_USERNAME/REVIEW_PASSWORD
+cp .env.example .env    # fill in DATABASE_URL, provider keys, CLERK_ISSUER,
+                         # LIVEKIT_*, SUPABASE_URL (storage), REVIEW_USERNAME/REVIEW_PASSWORD
 cd .. && docker compose up --build api crawler
 ```
 
@@ -282,6 +281,7 @@ npm run api:dev    # same, restarting on change
 | `GET /recipes/:id` | required | Full detail with images, ingredients, instructions and notes. 404 when absent |
 | `PUT /recipes/:id/favorite` | required | Saves it for the caller. Idempotent |
 | `DELETE /recipes/:id/favorite` | required | Unsaves it. Idempotent |
+| `POST /voice/token` | required | `{ recipeId }` → `{ data: { token, serverUrl, roomName, identity, expiresAt } }`. Mints a per-user, per-recipe LiveKit token that dispatches the `cookmate` agent. Needs `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` |
 | `POST /recipes/:id/events` | required | `{ kind: 'viewed' \| 'started' \| 'completed' }`. 204, and what `popular` counts |
 
 All but the events route return `{ data: ... }`.
@@ -293,27 +293,27 @@ readers liked.
 
 ### Authentication
 
-Every route except `/health` requires the caller's Supabase access token:
+Every route except `/health` requires the caller's Clerk session token:
 
 ```
-Authorization: Bearer <session.access_token>
+Authorization: Bearer <Clerk session token>
 ```
 
 The app gets this for free — `lib/api.ts` attaches the token and retries once on
-a 401 against a refreshed session. For curl, take a token from a signed-in
-session or mint one for a seeded user (`npm run seed:auth`).
+a 401 with a freshly minted one. For curl, take a token from a signed-in session.
 
-The token is verified **locally** (`src/api/auth.ts`): signature, `iss`,
-`aud: authenticated` and expiry. There is no call to the auth server on the
-request path. Two signing schemes are accepted, resolved from the token header,
-so a project can rotate from one to the other without dropping live sessions:
+The token is verified **locally** (`src/api/auth.ts`) against
+`${CLERK_ISSUER}/.well-known/jwks.json` (RS256 only): signature, `iss` and
+expiry. For web tokens the `azp` claim is also checked against
+`CLERK_AUTHORIZED_PARTIES`. There is no call to Clerk on the request path.
 
 ```bash
-SUPABASE_URL=https://PROJECT.supabase.co  # JWKS for ES256/RS256 keys + expected issuer
-SUPABASE_JWT_SECRET=...                   # only if the project still signs HS256
+CLERK_ISSUER=https://YOUR-INSTANCE.clerk.accounts.dev  # Frontend API URL; expected issuer + JWKS location
+CLERK_AUTHORIZED_PARTIES=http://localhost:8081         # comma-separated web origins allowed in `azp`
 ```
 
-With neither set the API **refuses to start** rather than serving unauthenticated.
+Test users: in a Clerk development instance, any `+clerk_test` email address
+signs in with verification code `424242`.
 
 A 401 body carries a `reason`: `missing_token`, `invalid_token`, or
 `token_expired`. Only the last one is worth retrying — it means refresh and try
@@ -331,6 +331,9 @@ API_PORT=8787
 API_HOST=0.0.0.0        # so a phone on the LAN can reach it
 API_CORS_ORIGIN=*       # set your web origin explicitly in production
 ```
+
+`SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are used for object storage only
+(raw pages and recipe images); they play no part in authentication.
 
 Three things worth knowing before you extend it:
 
