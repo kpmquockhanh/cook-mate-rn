@@ -143,8 +143,8 @@ Ported one-for-one from `supabase/functions/livekit-token/index.ts`:
 - Same grants (`roomJoin`, `room`, `canPublish`, `canSubscribe`, `canPublishData`,
   `canUpdateOwnMetadata`), same TTL, and the explicit agent dispatch for `cookmate`.
 - TTL stays 2 hours; dispatch via `RoomConfiguration({ agents: [new RoomAgentDispatch({ agentName })] })`.
-- Response `{ data: { token, serverUrl, roomName, expiresAt } }` (`expiresAt` in epoch
-  ms). These are the fields the edge function returns and `lib/livekitToken.ts`
+- Response `{ data: { token, serverUrl, roomName, identity, expiresAt } }` (`expiresAt`
+  in epoch ms). These are the fields the edge function returns and `lib/livekitToken.ts`
   consumes today, so the client's refresh-before-expiry logic keeps working.
 - Adds `livekit-server-sdk` to `backend/package.json`.
 - The agent name is a constant in `backend/src/api/routes/voice.ts` with a comment
@@ -158,15 +158,14 @@ Ported one-for-one from `supabase/functions/livekit-token/index.ts`:
 - `backend/src/auth/seed.ts`, the `seed-auth` case and help line in
   `backend/src/cli.ts`, and the `seed:auth` script in `backend/package.json`.
 - `supabase/functions/` (the edge function, its README, `deno.json`).
-- `supabase/config.toml` and `supabase/.temp/` if nothing else still uses them
-  (checked during implementation; storage and DB use connection strings/REST, not the
-  Supabase CLI).
+- `supabase/config.toml` and `supabase/.temp/` are kept until sub-project 3 (the
+  Supabase project still hosts Postgres and storage).
 
 ## Section 2 — App
 
 ### Dependencies and env
 
-- Add `@clerk/clerk-expo`.
+- Add `@clerk/expo` (v4, Clerk Core 3; `@clerk/clerk-expo` is deprecated). Sign-in/up use the Core 3 hooks: `signIn.password()`, `signIn.mfa.sendEmailCode()/verifyEmailCode()`, `signUp.password()`, `signUp.verifications.sendEmailCode()/verifyEmailCode()`, then `finalize()`.
 - Remove `@supabase/supabase-js` and `lib/supabase.ts`. Remove
   `react-native-url-polyfill` and `@react-native-async-storage/async-storage` only if
   nothing else imports them.
@@ -178,7 +177,7 @@ Ported one-for-one from `supabase/functions/livekit-token/index.ts`:
 ### Provider tree (`app/_layout.tsx`)
 
 ```
-ClerkProvider (publishableKey, tokenCache from @clerk/clerk-expo/token-cache)
+ClerkProvider (publishableKey, tokenCache from @clerk/expo/token-cache)
   └ AuthProvider → SettingsProvider → ShoppingProvider → FavoritesProvider → TimerProvider
 ```
 
@@ -246,7 +245,9 @@ Same layout and styles; the screen gains a code step and a Google button.
   `useSSO().startSSOFlow({ strategy: 'oauth_google', redirectUrl:
   AuthSession.makeRedirectUri({ scheme: 'cookmate', path: 'sso-callback' }) })`, with
   `WebBrowser.maybeCompleteAuthSession()` at module level and browser warm-up on
-  Android. On a returned `createdSessionId` → `setActive`. If the user cancels, no
+  Android. On a returned `createdSessionId` → `setActive`. A tiny `app/sso-callback.tsx`
+  route redirects to `/` so the OAuth deep link never lands on Expo Router's
+  unmatched-route screen. If the user cancels, no
   session comes back and the screen stays as it was, with no error.
 - **Errors:** `lib/clerkErrors.ts` maps Clerk error codes to `TranslationKey`s
   (`form_password_incorrect`, `form_identifier_not_found`, `form_identifier_exists`,
