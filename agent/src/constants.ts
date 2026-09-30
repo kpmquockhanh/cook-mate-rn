@@ -4,7 +4,7 @@
  *
  * Callers request it by putting a matching agent dispatch in the access token's
  * roomConfig. Both token issuers must use this exact name:
- *   - supabase/functions/livekit-token/index.ts  (real sessions)
+ *   - backend/src/api/routes/voice.ts            (real sessions)
  *   - src/generate-token.ts                      (local dev)
  *
  * Change it in one place and the others stop dispatching - the room connects

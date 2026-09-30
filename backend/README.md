@@ -45,6 +45,18 @@ Migrations, in order:
 | `0009_freshness.sql` | Per-source recrawl interval, plus HTTP validators on the crawl queue |
 | `0010_crawl_runs.sql` | `crawler.crawl_runs` — per-run counters that outlive the process |
 | `0011_crawl_run_logs.sql` | `crawler.crawl_run_logs` — the lines a run produced, stored as it goes |
+| `0012_recipe_facets.sql` | Facet columns on `public.recipes` (computed at publish time) that the home screen and list navigate by |
+| `0013_user_signals.sql` | `user_favorites` and `user_recipe_events`, the per-user signals behind hearts and "Popular" |
+| `0014_mirrored_images.sql` | `image_paths`: object paths of mirrored photos in our own public bucket |
+| `0015_recipe_translations.sql` | Overlay tables holding recipe free text in other languages |
+| `0016_translation_version.sql` | Translation version stamp, so a prompt change can re-run translation |
+| `0017_clerk_user_ids.sql` | **Truncates** `user_favorites` and `user_recipe_events`; `user_id` becomes text for Clerk ids |
+
+Migration 0017 is forward-only. It truncates `user_favorites` and
+`user_recipe_events` and changes `user_id` to text for Clerk ids. Run
+`npm run migrate` **before** starting the new API: its queries compare
+`user_id` to text and fail on every recipe read against the old uuid column.
+Rolling the API back afterwards requires restoring a dump.
 
 ### Where crawled HTML lives
 

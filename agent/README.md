@@ -168,7 +168,7 @@ status line names which:
 
 | What the cooking screen shows | Where the problem is |
 | --- | --- |
-| "Voice assistant unavailable — …" | the `livekit-token` edge function; the text is its own error |
+| "Voice assistant unavailable — …" | the API route `POST /voice/token` (`backend/src/api/routes/voice.ts`); the text is its own error |
 | "Microphone is off — …" | OS or browser permission |
 | "No assistant answered — …" | this worker: not running, or its name does not match the dispatch |
 | "Listening — …" | the chain is up |

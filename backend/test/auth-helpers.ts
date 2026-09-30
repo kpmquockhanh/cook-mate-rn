@@ -46,6 +46,8 @@ export interface TokenOverrides {
   azp?: string | null;
   /** Seconds from now. Negative mints an already-expired token. */
   expiresInSeconds?: number;
+  /** Mint a token with no `exp` claim at all. */
+  omitExp?: boolean;
   /** Sign with a key that is not in the JWKS (same `kid`, so the lookup succeeds and the signature fails). */
   wrongKey?: boolean;
 }
@@ -63,9 +65,9 @@ export async function mintToken(overrides: TokenOverrides = {}): Promise<string>
   let jwt = new SignJWT(claims)
     .setProtectedHeader({ alg: 'RS256', kid: KID, typ: 'JWT' })
     .setIssuer(overrides.issuer ?? TEST_ISSUER)
-    .setIssuedAt(now)
-    // Absolute value so a negative offset produces an already-expired token.
-    .setExpirationTime(now + (overrides.expiresInSeconds ?? 3600));
+    .setIssuedAt(now);
+  // Absolute value so a negative offset produces an already-expired token.
+  if (!overrides.omitExp) jwt = jwt.setExpirationTime(now + (overrides.expiresInSeconds ?? 3600));
   if (overrides.sub !== null) jwt = jwt.setSubject(overrides.sub ?? TEST_USER_ID);
 
   return jwt.sign(overrides.wrongKey ? stranger.privateKey : signing.privateKey);

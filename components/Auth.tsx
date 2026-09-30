@@ -38,6 +38,7 @@ export default function Auth() {
   const [password, setPassword] = useState(devPassword);
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [resending, setResending] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [focusedField, setFocusedField] = useState<'email' | 'password' | 'confirmPassword' | null>(
@@ -180,14 +181,21 @@ export default function Auth() {
   }
 
   async function resendCode() {
-    if (loading) return;
+    if (loading || resending) return;
+    setResending(true);
     setMessage(null);
-    const { error } =
-      codeFor === 'signUp'
-        ? await signUp.verifications.sendEmailCode()
-        : await signIn.mfa.sendEmailCode();
-    if (error) showError(error);
-    else setMessage({ kind: 'info', text: t('auth.codeResent') });
+    try {
+      const { error } =
+        codeFor === 'signUp'
+          ? await signUp.verifications.sendEmailCode()
+          : await signIn.mfa.sendEmailCode();
+      if (error) showError(error);
+      else setMessage({ kind: 'info', text: t('auth.codeResent') });
+    } catch (error) {
+      showError(error);
+    } finally {
+      setResending(false);
+    }
   }
 
   function backToForm() {
@@ -201,12 +209,17 @@ export default function Auth() {
     setLoading(true);
     setMessage(null);
     try {
-      const { createdSessionId, setActive } = await startSSOFlow({
+      const { createdSessionId, setActive, authSessionResult } = await startSSOFlow({
         strategy: 'oauth_google',
         redirectUrl: AuthSession.makeRedirectUri({ scheme: 'cookmate', path: 'sso-callback' }),
       });
-      // No session means the user closed the browser: stay put, say nothing.
-      if (createdSessionId && setActive) await setActive({ session: createdSessionId });
+      if (createdSessionId && setActive) {
+        await setActive({ session: createdSessionId });
+      } else if (authSessionResult?.type === 'success') {
+        // The browser flow finished but Clerk made no session: a real failure.
+        // Anything else (cancel, dismiss) means the user closed it: say nothing.
+        showError(null);
+      }
     } catch (error) {
       showError(error);
     } finally {
@@ -506,7 +519,7 @@ export default function Auth() {
                   <TouchableOpacity disabled={loading} onPress={backToForm}>
                     <Text style={styles.signUpText}>{t('auth.backToForm')}</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity disabled={loading} onPress={resendCode}>
+                  <TouchableOpacity disabled={loading || resending} onPress={resendCode}>
                     <Text style={styles.signUpLink}>{t('auth.resendCode')}</Text>
                   </TouchableOpacity>
                 </View>

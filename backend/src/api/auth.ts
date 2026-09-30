@@ -78,6 +78,9 @@ export function assertAuthConfigured(): void {
       'Auth is not configured: set CLERK_ISSUER to the Clerk Frontend API URL. See backend/.env.example.',
     );
   }
+  if (env.clerkAuthorizedParties.length === 0) {
+    log.warn('CLERK_AUTHORIZED_PARTIES is empty: web clients (tokens with azp) will be rejected');
+  }
 }
 
 /**
@@ -95,6 +98,7 @@ export async function verifyAccessToken(token: string): Promise<AuthenticatedUse
       // Phones drift. Anything larger starts to matter for revocation - Clerk
       // tokens only live for about a minute.
       clockTolerance: 10,
+      requiredClaims: ['exp', 'sub'],
     });
 
     // `azp` is the origin that requested a web token. Native tokens have none.

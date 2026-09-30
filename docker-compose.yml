@@ -4,7 +4,9 @@
 #
 # Usage:
 #   cp backend/.env.example backend/.env   # fill in DATABASE_URL, provider keys,
-#                                           # SUPABASE_URL, REVIEW_USERNAME/PASSWORD
+#                                           # SUPABASE_URL, REVIEW_USERNAME/PASSWORD,
+#                                           # CLERK_ISSUER, CLERK_AUTHORIZED_PARTIES,
+#                                           # LIVEKIT_URL/_API_KEY/_API_SECRET (voice tokens)
 #   cp agent/.env.example agent/.env       # fill in LIVEKIT_*
 #   docker compose up --build
 

@@ -253,6 +253,7 @@ const vi: Record<TranslationKey, Phrase> = {
   'settings.nameSaveError': 'Không lưu được tên của bạn',
   'settings.email': 'Email',
   'settings.signOut': 'Đăng xuất',
+  'settings.signOutError': 'Không đăng xuất được',
   'settings.signOutTitle': 'Đăng xuất?',
   'settings.signOutMessage': 'Danh sách mua sắm và cài đặt vẫn được giữ trên thiết bị này.',
 

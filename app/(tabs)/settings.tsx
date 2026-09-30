@@ -65,7 +65,12 @@ export default function Settings() {
       confirmLabel: t('settings.signOut'),
       destructive: true,
     });
-    if (confirmed) await signOut();
+    if (!confirmed) return;
+    try {
+      await signOut();
+    } catch (error) {
+      notify(t('settings.signOutError'), errorMessage(error, t('common.tryAgain')));
+    }
   };
 
   const handleSaveName = async () => {

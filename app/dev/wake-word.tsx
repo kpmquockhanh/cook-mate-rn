@@ -19,7 +19,7 @@ registerGlobals();
  * watch both. The level bar is our capture; "agent" is LiveKit's view.
  *
  * The default export is a thin gate so that no hook below - in particular
- * `useLiveKitToken`, which calls the `livekit-token` edge function - ever
+ * `useLiveKitToken`, which calls `POST /voice/token` on the API - ever
  * runs in a production build.
  */
 export default function WakeWordDevScreen() {

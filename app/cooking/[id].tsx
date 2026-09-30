@@ -114,7 +114,7 @@ export default function CookingPage() {
     []
   );
 
-  // Per-user, per-recipe credentials from the livekit-token edge function.
+  // Per-user, per-recipe credentials from the API (`POST /voice/token`, backend/src/api/routes/voice.ts).
   // Passing null while the assistant is off (or before the setting has been
   // read) is what stops a token being minted for a user who never wanted one.
   const voiceEnabled = settingsLoaded && settings.voiceEnabled;

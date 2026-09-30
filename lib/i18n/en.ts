@@ -274,6 +274,7 @@ const en = {
   'settings.nameSaveError': 'Could not save your name',
   'settings.email': 'Email',
   'settings.signOut': 'Sign out',
+  'settings.signOutError': 'Could not sign out',
   'settings.signOutTitle': 'Sign out?',
   'settings.signOutMessage': 'Your shopping list and settings stay on this device.',
 

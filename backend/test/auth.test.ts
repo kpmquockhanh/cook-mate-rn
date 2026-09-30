@@ -18,6 +18,7 @@ applyTestAuthEnv();
 const { buildServer } = await import('../src/api/server.js');
 const { setJwksForTesting, verifyAccessToken } = await import('../src/api/auth.js');
 const { close } = await import('../src/db.js');
+const { env } = await import('../src/env.js');
 installTestJwks(setJwksForTesting);
 
 /**
@@ -102,6 +103,28 @@ test('API authentication', async (t) => {
     // 200 with a database behind it, 500 without - either way it is not the
     // guard turning it away.
     assert.notEqual(response.statusCode, 401);
+  });
+
+  await t.test('rejects a token minted without exp', async () => {
+    const response = await get(bearer(await mintToken({ omitExp: true })));
+    assert.equal(response.statusCode, 401);
+    assert.equal(response.json().reason, 'invalid_token');
+  });
+
+  // An empty CLERK_AUTHORIZED_PARTIES means no web client is allowed, but
+  // native tokens (no azp) must keep working.
+  await t.test('with no authorized parties, rejects azp tokens and accepts native ones', async () => {
+    const saved = [...env.clerkAuthorizedParties];
+    env.clerkAuthorizedParties.length = 0;
+    try {
+      const web = await get(bearer(await mintToken({ azp: TEST_AUTHORIZED_PARTY })));
+      assert.equal(web.statusCode, 401);
+      assert.equal(web.json().reason, 'invalid_token');
+      const native = await get(await authHeaders());
+      assert.notEqual(native.statusCode, 401);
+    } finally {
+      env.clerkAuthorizedParties.push(...saved);
+    }
   });
 
   await t.test('reports an expired token distinctly so the app can refresh', async () => {

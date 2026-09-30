@@ -1,7 +1,9 @@
 import 'dotenv/config';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { decodeJwt } from 'jose';
+import { fileURLToPath } from 'node:url';
 import { applyTestAuthEnv, authHeaders, installTestJwks, TEST_USER_ID } from './auth-helpers.js';
 
 applyTestAuthEnv();
@@ -12,6 +14,7 @@ process.env.LIVEKIT_API_SECRET = 'test-api-secret-that-is-long-enough-for-hs256'
 const { buildServer } = await import('../src/api/server.js');
 const { setJwksForTesting } = await import('../src/api/auth.js');
 const { close } = await import('../src/db.js');
+const { AGENT_NAME, slug } = await import('../src/api/routes/voice.js');
 installTestJwks(setJwksForTesting);
 
 // No database: the route only signs a token.
@@ -71,4 +74,18 @@ test('POST /voice/token', async (t) => {
     );
     assert.equal(response.json().data.roomName, `cooking-${TEST_USER_ID}-7`);
   });
+});
+
+test('slug keeps [A-Za-z0-9_-], replaces the rest with -, and truncates to 64', () => {
+  assert.equal(slug('user_2abc-XYZ_09'), 'user_2abc-XYZ_09');
+  assert.equal(slug('a b/c:d.é'), 'a-b-c-d--');
+  assert.equal(slug('x'.repeat(100)).length, 64);
+});
+
+// The agent package builds separately, so its copy of the name is checked as text.
+test('the agent worker name matches the one the token route dispatches', () => {
+  const file = fileURLToPath(new URL('../../agent/src/constants.ts', import.meta.url));
+  const match = /export const AGENT_NAME = '([^']+)'/.exec(readFileSync(file, 'utf8'));
+  assert.ok(match, 'agent/src/constants.ts must export AGENT_NAME');
+  assert.equal(match[1], AGENT_NAME);
 });

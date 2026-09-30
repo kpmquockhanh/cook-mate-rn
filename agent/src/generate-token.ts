@@ -5,8 +5,8 @@ import { AccessToken, RoomAgentDispatch, RoomConfiguration } from 'livekit-serve
 import { AGENT_NAME } from './constants.js';
 
 // Dev convenience only: prints a long-lived token for a single shared room.
-// Real sessions get a per-user token from the `livekit-token` Supabase edge
-// function (see supabase/functions/livekit-token/index.ts).
+// Real sessions get a per-user token from `POST /voice/token` on the API
+// (see backend/src/api/routes/voice.ts).
 
 const apiKey = process.env.LIVEKIT_API_KEY!;
 const apiSecret = process.env.LIVEKIT_API_SECRET!;
