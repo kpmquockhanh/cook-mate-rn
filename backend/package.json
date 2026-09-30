@@ -10,7 +10,6 @@
     "setup": "tsx src/cli.ts setup",
     "migrate": "tsx src/cli.ts migrate",
     "seed": "tsx src/cli.ts seed-canonical",
-    "seed:auth": "tsx src/cli.ts seed-auth",
     "enqueue": "tsx src/cli.ts enqueue",
     "discover": "tsx src/cli.ts discover",
     "crawl": "tsx src/cli.ts crawl",

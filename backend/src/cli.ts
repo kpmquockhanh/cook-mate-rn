@@ -1,5 +1,4 @@
 import { readFile } from 'node:fs/promises';
-import { clearTestUsers, seedTestUsers } from './auth/seed.js';
 import { reportUnmatched } from './canonical/match.js';
 import { seedCanonical } from './canonical/seed.js';
 import { discover } from './crawl/discover.js';
@@ -47,7 +46,6 @@ CookMate recipe pipeline
   setup                        Fresh database: migrate + seed, in order
   migrate                      Apply SQL migrations
   seed-canonical               Load/refresh the canonical ingredient dictionary
-  seed-auth [--clear]          Create/refresh the test auth users (dev only)
   ui                           Pipeline console: run every stage from a browser
   enqueue <url|@file> ...      Queue URLs (@file reads one URL per line)
   discover <url>               Explore a site and queue the recipe URLs it finds
@@ -125,13 +123,6 @@ async function main() {
 
     case 'seed-canonical':
       await seedCanonical();
-      break;
-
-    // Deliberately not part of `setup`: these are real, signed-in-able accounts
-    // and they have no business existing in a production project.
-    case 'seed-auth':
-      if (flag(args, 'clear')) await clearTestUsers();
-      else await seedTestUsers();
       break;
 
     case 'enqueue': {
