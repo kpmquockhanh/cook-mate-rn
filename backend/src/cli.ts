@@ -17,6 +17,7 @@ import { preflight, printPreflight, publishAndTranslate } from './publish/run.js
 import { translateAll, translationCoverage } from './translate/run.js';
 import { ensureImageBucket, publicBaseUrl } from './storage/images.js';
 import { ensureBucket, describeStore } from './storage/pages.js';
+import { prepareStorage } from './storage/setup.js';
 import { backfillRawPages } from './storage/rawPages.js';
 import { printRunLog, printRuns, type RunKind } from './jobs/runs.js';
 import { startConsole } from './ui/server.js';
@@ -109,15 +110,10 @@ async function main() {
       // Crawling writes its first page to object storage, so a missing bucket
       // should surface here and not on the first fetch. A machine without
       // storage credentials yet is a warning, not a failed setup.
-      try {
-        log.info(await ensureBucket());
-      } catch (error) {
-        log.warn(`page storage not ready: ${String(error)}`);
-      }
-      try {
-        log.info(await ensureImageBucket());
-      } catch (error) {
-        log.warn(`image storage not ready: ${String(error)}`);
+      {
+        const storage = await prepareStorage({ pages: ensureBucket, images: ensureImageBucket });
+        storage.info.forEach((line) => log.info(line));
+        storage.warn.forEach((line) => log.warn(line));
       }
       log.info('setup complete - run `npm run publish -- --check` to verify the app schema');
       break;

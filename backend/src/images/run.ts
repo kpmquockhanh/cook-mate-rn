@@ -82,19 +82,15 @@ export async function mirrorImages(
       [row.image_url, ...row.image_urls].filter((url): url is string => Boolean(url)),
     ).slice(0, env.imagesPerRecipe);
 
-    const paths: string[] = [];
-    for (const url of candidates) {
-      try {
-        const path = await mirrorOne(url, row.source_delay_ms ?? undefined);
-        if (path) paths.push(path);
-      } catch (error) {
-        failed++;
-        log.warn(`#${row.id} ${url}: ${String(error).slice(0, 120)}`);
-      }
-    }
+    const mirrored = await mirrorCandidates(row.id, candidates, (url) =>
+      mirrorOne(url, row.source_delay_ms ?? undefined),
+    );
+    const paths = mirrored.paths;
+    failed += mirrored.failed;
 
     // Stamped even when nothing was stored, so a row whose photos are all gone
     // is not retried on every run. `--force` is how you retry deliberately.
+    // A storage failure never gets here: mirrorCandidates rethrows it.
     await query(
       `update crawler.recipe_staging
           set image_paths = $2, images_mirrored_at = now()
@@ -108,6 +104,37 @@ export async function mirrorImages(
 
   log.info(`mirrored ${stored} image(s) across ${rows.length} recipe(s), ${failed} failed`);
   return { rows: rows.length, stored, failed };
+}
+
+/** Our own bucket refused a write: not the photo's fault, so not a per-photo failure. */
+export class ImageStorageError extends Error {
+  override name = 'ImageStorageError';
+}
+
+/**
+ * Mirrors one recipe's photos. A photo that cannot be fetched is counted and
+ * skipped; a storage failure is rethrown, ending the run before the row is
+ * stamped - otherwise a MinIO outage would mark every remaining recipe as
+ * mirrored with no photos, and nothing would ever retry them.
+ */
+export async function mirrorCandidates(
+  rowId: number,
+  candidates: string[],
+  mirror: (url: string) => Promise<string | null>,
+): Promise<{ paths: string[]; failed: number }> {
+  const paths: string[] = [];
+  let failed = 0;
+  for (const url of candidates) {
+    try {
+      const path = await mirror(url);
+      if (path) paths.push(path);
+    } catch (error) {
+      if (error instanceof ImageStorageError) throw error;
+      failed++;
+      log.warn(`#${rowId} ${url}: ${String(error).slice(0, 120)}`);
+    }
+  }
+  return { paths, failed };
 }
 
 /**
@@ -136,5 +163,9 @@ async function mirrorOne(url: string, sourceDelayMs?: number): Promise<string | 
     return null;
   }
 
-  return storeImage(bytes, contentType);
+  try {
+    return await storeImage(bytes, contentType);
+  } catch (error) {
+    throw new ImageStorageError(String(error), { cause: error });
+  }
 }

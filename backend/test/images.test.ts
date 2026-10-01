@@ -86,3 +86,27 @@ test('the public base URL uses S3_PUBLIC_URL, else S3_ENDPOINT, without doubled 
     process.env.S3_ENDPOINT = saved.endpoint ?? '';
   }
 });
+
+test('mirroring counts a bad photo as a failure and keeps going', async () => {
+  const { mirrorCandidates } = await import('../src/images/run.js');
+  const urls = ['https://a/1.jpg', 'https://a/2.jpg', 'https://a/3.jpg'];
+  const result = await mirrorCandidates(7, urls, async (url) => {
+    if (url.endsWith('1.jpg')) throw new Error('ECONNRESET');
+    return url.endsWith('2.jpg') ? null : 'ab/abc.jpg';
+  });
+  assert.deepEqual(result, { paths: ['ab/abc.jpg'], failed: 1 });
+});
+
+// Otherwise the row is stamped as mirrored with no photos and never retried.
+test('a storage failure stops mirroring instead of counting as a bad photo', async () => {
+  const { ImageStorageError, mirrorCandidates } = await import('../src/images/run.js');
+  let calls = 0;
+  await assert.rejects(
+    mirrorCandidates(7, ['https://a/1.jpg', 'https://a/2.jpg'], async () => {
+      calls++;
+      throw new ImageStorageError('S3 PutObject recipe-images/ab/abc.jpg failed: ECONNREFUSED');
+    }),
+    ImageStorageError
+  );
+  assert.equal(calls, 1);
+});

@@ -13,6 +13,16 @@ function int(name: string, fallback: number): number {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+/** A value with surrounding whitespace (easy to paste into .env) removed; blank is unset. */
+function setting(raw: string | undefined): string | undefined {
+  return raw?.trim() || undefined;
+}
+
+/** A base URL as callers join it: trimmed, without trailing slashes. */
+function s3Url(raw: string | undefined): string | undefined {
+  return setting(raw)?.replace(/\/+$/, '') || undefined;
+}
+
 /**
  * Default model pair per provider: the cheap workhorse, and the stronger tier
  * `enrich --escalate` falls back to. ENRICH_MODEL / ENRICH_ESCALATION_MODEL
@@ -175,26 +185,22 @@ export const env = {
   // The S3 API the backend talks to, e.g. http://localhost:9000 (compose
   // overrides it to http://minio:9000 inside its containers).
   get s3Endpoint() {
-    return process.env.S3_ENDPOINT?.replace(/\/+$/, '') || undefined;
+    return s3Url(process.env.S3_ENDPOINT);
   },
   // MinIO accepts any region, but the SDK will not sign without one.
   get s3Region() {
-    return process.env.S3_REGION || 'us-east-1';
+    return setting(process.env.S3_REGION) ?? 'us-east-1';
   },
   get s3AccessKeyId() {
-    return process.env.S3_ACCESS_KEY_ID || undefined;
+    return setting(process.env.S3_ACCESS_KEY_ID);
   },
   get s3SecretAccessKey() {
-    return process.env.S3_SECRET_ACCESS_KEY || undefined;
+    return setting(process.env.S3_SECRET_ACCESS_KEY);
   },
   // Where clients read public objects. Differs from the endpoint when the
   // backend reaches MinIO by a container name but a phone needs a LAN address.
   get s3PublicUrl() {
-    return (
-      process.env.S3_PUBLIC_URL?.replace(/\/+$/, '') ||
-      process.env.S3_ENDPOINT?.replace(/\/+$/, '') ||
-      undefined
-    );
+    return s3Url(process.env.S3_PUBLIC_URL) ?? s3Url(process.env.S3_ENDPOINT);
   },
 
   // ---- Raw page storage (src/storage/pages.ts) ----

@@ -52,7 +52,8 @@ export function s3Client(): S3Like {
     ].filter(Boolean);
     throw new Error(
       `Object storage is not configured: set ${missing.join(', ')}. ` +
-        'For local crawling without an object store, set RAW_PAGE_STORE=file. See backend/.env.example.'
+        'Raw pages can use RAW_PAGE_STORE=file for local crawling, but recipe images still ' +
+        'need object storage. See backend/.env.example.'
     );
   }
 
@@ -134,7 +135,10 @@ export async function getObject(bucket: string, key: string): Promise<Uint8Array
     if (!response.Body) return null;
     return await response.Body.transformToByteArray();
   } catch (error) {
-    if (isNotFound(error, 'NoSuchKey', 'NotFound')) return null;
+    // A 404 also covers NoSuchBucket, which is misconfiguration, not a
+    // missing page: let it fail loudly.
+    if ((error as Error)?.name !== 'NoSuchBucket' && isNotFound(error, 'NoSuchKey', 'NotFound'))
+      return null;
     throw storageError('GetObject', bucket, key, error);
   }
 }
@@ -166,7 +170,25 @@ function publicReadPolicy(bucket: string): string {
 
 const asList = (value: unknown): unknown[] => (Array.isArray(value) ? value : [value]);
 
-/** True when `policy` lets anyone GetObject on every key in `bucket`. */
+/** IAM-style wildcard match: `*` is any run of characters, `?` exactly one. */
+function wildcard(pattern: string, value: string, ignoreCase = false): boolean {
+  const source = pattern
+    .split('')
+    .map((char) =>
+      char === '*' ? '.*' : char === '?' ? '.' : char.replace(/[.+^${}()|[\]\\]/g, '\\$&')
+    )
+    .join('');
+  return new RegExp(`^${source}$`, ignoreCase ? 'i' : '').test(value);
+}
+
+/**
+ * True when `policy` lets anyone GetObject on every key in `bucket`: an
+ * unconditional anonymous Allow whose action and resource patterns cover it,
+ * not cancelled by an unconditional anonymous Deny that covers it too.
+ * Conditional statements are left out on both sides - a conditional grant is
+ * not public read, and a conditional Deny (typically "no plain HTTP") does not
+ * stop the app's reads.
+ */
 function grantsPublicRead(policy: string, bucket: string): boolean {
   let statements: unknown[];
   try {
@@ -174,24 +196,33 @@ function grantsPublicRead(policy: string, bucket: string): boolean {
   } catch {
     return false;
   }
-  return statements.some((raw) => {
+  const everyKey = `arn:aws:s3:::${bucket}/*`;
+  const covering = statements.filter((raw): raw is { Effect?: string } => {
     if (!raw || typeof raw !== 'object') return false; // e.g. `{}`, a policy with no Statement
     const statement = raw as {
-      Effect?: string;
       Principal?: unknown;
       Action?: unknown;
       Resource?: unknown;
+      Condition?: unknown;
     };
     const principal = statement.Principal;
     const anyone =
       principal === '*' || asList((principal as { AWS?: unknown } | undefined)?.AWS).includes('*');
     return (
-      statement.Effect === 'Allow' &&
       anyone &&
-      asList(statement.Action).some((action) => action === 's3:GetObject' || action === 's3:*') &&
-      asList(statement.Resource).includes(`arn:aws:s3:::${bucket}/*`)
+      statement.Condition === undefined &&
+      asList(statement.Action).some(
+        (action) => typeof action === 'string' && wildcard(action, 's3:GetObject', true)
+      ) &&
+      asList(statement.Resource).some(
+        (resource) => typeof resource === 'string' && wildcard(resource, everyKey)
+      )
     );
   });
+  return (
+    covering.some((statement) => statement.Effect === 'Allow') &&
+    !covering.some((statement) => statement.Effect === 'Deny')
+  );
 }
 
 /** Create the bucket if it is missing; for a public one, make sure anyone can read it. */

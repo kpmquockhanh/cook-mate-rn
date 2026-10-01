@@ -95,6 +95,17 @@ test('a missing object reads as null, whether the SDK says NoSuchKey or just 404
   assert.equal(await s3.getObject('raw-pages', 'aa/gone.html.gz'), null);
 });
 
+// A wrong RAW_PAGE_BUCKET would otherwise read as "every page is missing".
+test('a missing bucket is rethrown, not read as a missing object', async () => {
+  fakeClient(() => {
+    throw sdkError('NoSuchBucket', 404);
+  });
+  await assert.rejects(
+    s3.getObject('raw-pagez', 'aa/x.html.gz'),
+    /S3 GetObject raw-pagez\/aa\/x\.html\.gz failed: NoSuchBucket/
+  );
+});
+
 test('any other failure is rethrown naming the operation, bucket, key and error', async () => {
   const original = sdkError('AccessDenied', 403);
   fakeClient(() => {
@@ -195,6 +206,60 @@ test('an existing public bucket with the read grant reports ok, in either policy
   }
 });
 
+/** The publicPolicy an existing public bucket reports with these policy statements. */
+async function policyVerdict(...statements: object[]) {
+  fakeClient((command) =>
+    command instanceof GetBucketPolicyCommand
+      ? { Policy: JSON.stringify({ Version: '2012-10-17', Statement: statements }) }
+      : {}
+  );
+  return (await s3.ensureBucket('recipe-images', { public: true })).publicPolicy;
+}
+
+const anonymousRead = {
+  Effect: 'Allow',
+  Principal: '*',
+  Action: 's3:GetObject',
+  Resource: 'arn:aws:s3:::recipe-images/*',
+};
+
+test('wildcard actions and resources that cover GetObject on the bucket count as the read grant', async () => {
+  for (const Action of ['s3:Get*', 's3:*', '*', 'S3:GETOBJECT']) {
+    assert.equal(await policyVerdict({ ...anonymousRead, Action }), 'ok', Action);
+  }
+  for (const Resource of ['arn:aws:s3:::*', '*', 'arn:aws:s3:::recipe-images*']) {
+    assert.equal(await policyVerdict({ ...anonymousRead, Resource }), 'ok', Resource);
+  }
+  assert.equal(await policyVerdict({ ...anonymousRead, Action: 's3:Put*' }), 'missing');
+  assert.equal(
+    await policyVerdict({ ...anonymousRead, Resource: 'arn:aws:s3:::recipe-images/public/*' }),
+    'missing'
+  );
+});
+
+test('a conditional grant is not public read', async () => {
+  assert.equal(
+    await policyVerdict({
+      ...anonymousRead,
+      Condition: { IpAddress: { 'aws:SourceIp': '10.0.0.0/8' } },
+    }),
+    'missing'
+  );
+});
+
+test('an unconditional Deny on anonymous reads cancels the grant; a conditional one does not', async () => {
+  const deny = { ...anonymousRead, Effect: 'Deny', Action: 's3:*' };
+  assert.equal(await policyVerdict(anonymousRead, deny), 'missing');
+  // The common "deny plain HTTP" statement must not read as "not public".
+  assert.equal(
+    await policyVerdict(anonymousRead, {
+      ...deny,
+      Condition: { Bool: { 'aws:SecureTransport': 'false' } },
+    }),
+    'ok'
+  );
+});
+
 test('an existing public bucket without the grant reports missing and writes nothing', async () => {
   // An operator's own policy is never overwritten; the check only reports.
   const sent = fakeClient((command) => {
@@ -235,6 +300,8 @@ test('without an injected client, missing configuration names every missing vari
       assert.match(error.message, /S3_ACCESS_KEY_ID/);
       assert.match(error.message, /S3_SECRET_ACCESS_KEY/);
       assert.match(error.message, /RAW_PAGE_STORE=file/);
+      // The file store is for raw pages only; images have no fallback.
+      assert.match(error.message, /recipe images still need object storage/i);
       return true;
     }
   );
@@ -308,4 +375,34 @@ test('an SDK error message names its HTTP status', async () => {
 test('a policy with no statements reads as missing, not as a failed request', async () => {
   fakeClient((command) => (command instanceof GetBucketPolicyCommand ? { Policy: '{}' } : {}));
   assert.equal((await s3.ensureBucket('recipe-images', { public: true })).publicPolicy, 'missing');
+});
+
+test('S3 settings ignore whitespace pasted around them in .env', async () => {
+  const { env } = await import('../src/env.js');
+  const saved = { ...process.env };
+  process.env.S3_ENDPOINT = ' http://localhost:9000/ ';
+  process.env.S3_PUBLIC_URL = '  http://192.168.1.5:9000/\n';
+  process.env.S3_REGION = ' us-east-1 ';
+  process.env.S3_ACCESS_KEY_ID = ' minio ';
+  process.env.S3_SECRET_ACCESS_KEY = '  ';
+  try {
+    assert.equal(env.s3Endpoint, 'http://localhost:9000');
+    assert.equal(env.s3PublicUrl, 'http://192.168.1.5:9000');
+    assert.equal(env.s3Region, 'us-east-1');
+    assert.equal(env.s3AccessKeyId, 'minio');
+    assert.equal(env.s3SecretAccessKey, undefined);
+    process.env.S3_PUBLIC_URL = ' ';
+    assert.equal(env.s3PublicUrl, 'http://localhost:9000');
+  } finally {
+    for (const key of [
+      'S3_ENDPOINT',
+      'S3_PUBLIC_URL',
+      'S3_REGION',
+      'S3_ACCESS_KEY_ID',
+      'S3_SECRET_ACCESS_KEY',
+    ]) {
+      if (saved[key] === undefined) delete process.env[key];
+      else process.env[key] = saved[key];
+    }
+  }
 });
