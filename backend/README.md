@@ -99,19 +99,6 @@ release tag. The root credentials are fine for local work. Elsewhere, create an
 access key limited to the two buckets, and put MinIO behind TLS with
 `S3_PUBLIC_URL` set to its public address.
 
-**Moving from Supabase Storage** (a fresh start, nothing is copied):
-
-1. Start MinIO as above and set the `S3_*` values in `backend/.env`. Delete
-   `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`.
-2. `npm run dev -- storage check && npm run dev -- images --check` creates both
-   buckets, and the second command prints the value for the app's
-   `EXPO_PUBLIC_STORAGE_URL`.
-3. Put that value in the root `.env` and restart the Expo dev server.
-4. `npm run dev -- images --force`, then `npm run publish`, so every recipe
-   points at re-mirrored images.
-5. Raw pages need nothing: a missing object is re-fetched when the crawler
-   next needs it.
-
 **Upgrading a database that predates this**, HTML still in the column:
 
 ```bash
@@ -157,24 +144,6 @@ server starts second instead, it can still bind IPv6 `::1`, and a URL that says
 `npm run setup`. That is why the URLs here say `127.0.0.1`, the exact address
 compose binds. Stop the other server (`brew services stop postgresql@17`), or
 change the compose port mapping and the port in `DATABASE_URL` to match.
-
-**Moving from Supabase Postgres** (a fresh start, nothing is copied):
-
-1. In the root `.env`, set `POSTGRES_PASSWORD` (letters and digits; optionally
-   `POSTGRES_USER` and `POSTGRES_DB`, both default `cookmate`), then
-   `docker compose up -d postgres`.
-2. In `backend/.env`, set
-   `DATABASE_URL=postgres://cookmate:<password>@127.0.0.1:5432/cookmate`.
-3. `npm run setup` — applies every migration (including 0017, the Clerk user
-   ids) and seeds the canonical dictionary.
-4. `npm run dev -- storage check && npm run dev -- images --check`, then
-   `npm run pipeline` and `npm run publish` to fill it again.
-5. Once the app works against it, delete the Supabase CLI's local state
-   (`rm -rf supabase/` from the repo root) and pause or delete the Supabase
-   project in its dashboard.
-
-Favorites, shopping signals and hand-reviewed recipes that lived only in
-Supabase are gone after this.
 
 ## Running it
 

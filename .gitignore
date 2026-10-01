@@ -77,8 +77,6 @@ coverage/
 ## .cursor/
 .cursor/
 
-## Supabase CLI local state (project ref, pooler URL) until supabase/ is deleted
-supabase/.temp/
 
 ## Python caches
 __pycache__/

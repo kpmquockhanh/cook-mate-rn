@@ -69,8 +69,8 @@ test('API authentication', async (t) => {
     assert.equal(response.json().reason, 'invalid_token');
   });
 
-  // The legacy Supabase path accepted HS256. Clerk never issues it, so a token
-  // using it is forged or stale, whatever its claims say.
+  // Clerk never issues HS256, so a token using it is forged or stale, whatever
+  // its claims say.
   await t.test('rejects an HS256 token', async () => {
     const response = await get(bearer(await mintHs256Token()));
     assert.equal(response.statusCode, 401);

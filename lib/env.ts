@@ -10,9 +10,8 @@
  *      with a computed name resolves to undefined in a build. Do not refactor
  *      these into a loop.
  *   2. A missing variable is reported with every other missing variable, at
- *      startup, naming the file to fix. The previous behaviour was a non-null
- *      assertion in the old Supabase client that turned a blank .env into an opaque
- *      failure deep inside a request.
+ *      startup, naming the file to fix. A blank .env must not turn into an
+ *      opaque failure deep inside a request.
  *
  * Nothing secret belongs here: EXPO_PUBLIC_* values ship inside the JS bundle
  * and are readable by anyone with the app. The API's token check is what guards
