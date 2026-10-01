@@ -59,9 +59,9 @@ export const env = {
   get databaseUrl() {
     return required('DATABASE_URL');
   },
-  // A Supabase pooler in a distant region can take several seconds to accept a
-  // connection. Too tight a timeout does not protect anything - it just turns
-  // ordinary latency into a failed request.
+  // A remote Postgres can take several seconds to accept a connection. Too
+  // tight a timeout does not protect anything - it just turns ordinary latency
+  // into a failed request.
   dbConnectTimeoutMs: int('DB_CONNECT_TIMEOUT_MS', 30000),
   get anthropicApiKey() {
     return required('ANTHROPIC_API_KEY');

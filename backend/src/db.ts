@@ -10,24 +10,35 @@ pg.types.setTypeParser(pg.types.builtins.INT8, (v) => (v === null ? null : Numbe
 
 let poolRef: pg.Pool | null = null;
 
+/**
+ * The pool's options, split out so tests can check them without connecting.
+ *
+ * TLS is the URL's business: there is deliberately no `ssl` key, so pg applies
+ * `sslmode` from the connection string. No `sslmode` means plain TCP (docker
+ * compose, localhost). `?sslmode=verify-full` means TLS with a certificate
+ * that must verify; `?sslmode=no-verify` means TLS against a self-signed
+ * server. Avoid `require`: pg 8 treats it as verify-full but warns that pg 9
+ * changes its meaning.
+ */
+export function poolConfig(connectionString: string): pg.PoolConfig {
+  return {
+    connectionString,
+    max: Math.max(4, env.crawlConcurrency + 2),
+    // Without this a wrong host hangs the API request (or the test suite)
+    // instead of failing; pg waits indefinitely by default. It is generous
+    // because a remote server can legitimately take several seconds to accept
+    // a connection, and a timeout shorter than a healthy connect turns
+    // ordinary latency into an outage.
+    connectionTimeoutMillis: env.dbConnectTimeoutMs,
+  };
+}
+
 export function pool(): pg.Pool {
   if (!poolRef) {
-    poolRef = new pg.Pool({
-      connectionString: env.databaseUrl,
-      max: Math.max(4, env.crawlConcurrency + 2),
-      // Supabase terminates TLS with its own CA chain; this matches what the
-      // Supabase CLI and psql `sslmode=require` do.
-      ssl: env.databaseUrl.includes('localhost') ? undefined : { rejectUnauthorized: false },
-      // Without this a wrong host hangs the API request (or the test suite)
-      // instead of failing; pg waits indefinitely by default. It is generous
-      // because a pooler in a distant region can legitimately take several
-      // seconds, and a timeout shorter than a healthy connect turns ordinary
-      // latency into an outage.
-      connectionTimeoutMillis: env.dbConnectTimeoutMs,
-    });
+    poolRef = new pg.Pool(poolConfig(env.databaseUrl));
 
     // An idle client whose connection drops - a laptop sleeping, wifi changing,
-    // a pooler recycling - makes pg emit 'error' on the POOL, not on any query.
+    // a server restarting - makes pg emit 'error' on the POOL, not on any query.
     // Node treats an unhandled 'error' event as fatal, so without this listener
     // a transient network blip takes down the console or the API rather than
     // costing one reconnect.
