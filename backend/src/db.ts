@@ -18,7 +18,9 @@ let poolRef: pg.Pool | null = null;
  * compose, localhost). `?sslmode=verify-full` means TLS with a certificate
  * that must verify; `?sslmode=no-verify` means TLS against a self-signed
  * server. Avoid `require`: pg 8 treats it as verify-full but warns that pg 9
- * changes its meaning.
+ * changes its meaning. One catch: with no `sslmode` in the URL, pg falls back
+ * to the PGSSLMODE environment variable, so an exported PGSSLMODE=require
+ * turns TLS on against a server that has none.
  */
 export function poolConfig(connectionString: string): pg.PoolConfig {
   return {

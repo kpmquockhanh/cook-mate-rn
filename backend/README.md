@@ -25,7 +25,7 @@ docker compose up -d postgres minio
 
 cd backend
 npm install
-cp .env.example .env     # DATABASE_URL=postgres://cookmate:<password>@localhost:5432/cookmate,
+cp .env.example .env     # DATABASE_URL=postgres://cookmate:<password>@127.0.0.1:5432/cookmate,
                          # plus ANTHROPIC_API_KEY
 npm run setup            # migrate + seed, in the right order
 npm run publish -- --check   # confirms the publisher's target columns exist
@@ -132,22 +132,28 @@ that serves `EXPO_PUBLIC_API_URL`, so the publisher's table/column names are
 and nowhere else. The check introspects your live database and names every
 table or column that is missing.
 
-**Remote Postgres.** Any Postgres 15+ works; `DATABASE_URL` alone decides TLS
+**Remote Postgres.** Any Postgres 15+ works; `DATABASE_URL` decides TLS
 (`src/db.ts` never sets it):
 
-- no `sslmode` — plain TCP. Right for docker compose and localhost.
+- no `sslmode` — plain TCP. Right for docker compose and `127.0.0.1`.
 - `?sslmode=verify-full` — TLS, and the server's certificate must verify.
 - `?sslmode=no-verify` — TLS without checking the certificate, for a
   self-signed server.
 
 Don't use `sslmode=require`: pg 8 treats it as `verify-full` but prints a
-warning that pg 9 changes its meaning.
+warning that pg 9 changes its meaning. And check your shell for an exported
+`PGSSLMODE`: with no `sslmode` in the URL, pg uses that variable instead, so
+`PGSSLMODE=require` (common in shells set up for psql) brings back "The
+server does not support SSL connections" against compose.
 
 **Port 5432 already taken.** If Homebrew's or Postgres.app's Postgres is
-running, `docker compose up postgres` fails to bind `127.0.0.1:5432` — or, if
-that server started second, host-side commands quietly connect to it instead.
-Stop the other server (`brew services stop postgresql@17`), or change the
-compose port mapping and the port in `DATABASE_URL` to match.
+running, `docker compose up postgres` fails to bind `127.0.0.1:5432`. If that
+server starts second instead, it can still bind IPv6 `::1`, and a URL that says
+`localhost` (which Node tries as `::1` first) quietly reaches it: the symptom is
+`role "cookmate" does not exist` or `password authentication failed` from
+`npm run setup`. That is why the URLs here say `127.0.0.1`, the exact address
+compose binds. Stop the other server (`brew services stop postgresql@17`), or
+change the compose port mapping and the port in `DATABASE_URL` to match.
 
 **Moving from Supabase Postgres** (a fresh start, nothing is copied):
 
@@ -155,7 +161,7 @@ compose port mapping and the port in `DATABASE_URL` to match.
    `POSTGRES_USER` and `POSTGRES_DB`, both default `cookmate`), then
    `docker compose up -d postgres`.
 2. In `backend/.env`, set
-   `DATABASE_URL=postgres://cookmate:<password>@localhost:5432/cookmate`.
+   `DATABASE_URL=postgres://cookmate:<password>@127.0.0.1:5432/cookmate`.
 3. `npm run setup` — applies every migration (including 0017, the Clerk user
    ids) and seeds the canonical dictionary.
 4. `npm run dev -- storage check && npm run dev -- images --check`, then
@@ -340,11 +346,9 @@ cd .. && docker compose up --build api crawler
 The compose file also starts Postgres and MinIO; their credentials
 (`POSTGRES_*`, `MINIO_ROOT_*`) come from the root `.env`. Inside compose the
 `api` and `crawler` containers get their own `DATABASE_URL` pointing at
-`postgres:5432`, so `backend/.env`'s localhost URL is only for host-side
+`postgres:5432`, so `backend/.env`'s `127.0.0.1` URL is only for host-side
 commands. They wait for Postgres to be healthy, but nothing migrates on start:
 run `npm run setup` once against a new database.
-
-- [ ]
 
 The image installs `devDependencies` too and runs via `tsx`, matching how the
 package.json scripts already run — there's no separate compiled build. The

@@ -7,6 +7,11 @@ import { env } from '../src/env.js';
 // What pg itself will do with these options: a Client resolves its TLS
 // settings in the constructor and connects only on .connect(), so this
 // checks the behaviour without a server.
+//
+// pg falls back to PGSSLMODE when the URL has no sslmode, so a shell set up
+// for psql would otherwise decide these results instead of the URL.
+delete process.env.PGSSLMODE;
+
 function tlsOf(connectionString: string): unknown {
   return (new pg.Client(poolConfig(connectionString)) as unknown as { ssl: unknown }).ssl;
 }

@@ -6,7 +6,7 @@
 #   cp .env.example .env                   # MINIO_ROOT_USER / MINIO_ROOT_PASSWORD,
 #                                           # POSTGRES_PASSWORD (+ optional POSTGRES_USER,
 #                                           # POSTGRES_DB) - compose reads the root .env
-#   cp backend/.env.example backend/.env   # fill in DATABASE_URL (the localhost one, for
+#   cp backend/.env.example backend/.env   # fill in DATABASE_URL (the 127.0.0.1 one, for
 #                                           # host-side commands), provider keys,
 #                                           # S3_ACCESS_KEY_ID/S3_SECRET_ACCESS_KEY
 #                                           # (the MinIO credentials), S3_PUBLIC_URL,
@@ -21,7 +21,7 @@
 services:
   # The database for the pipeline and the API. Nothing migrates on start: run
   # `npm run setup` from backend/ once against a new database (host-side
-  # commands reach it on localhost:5432).
+  # commands reach it on 127.0.0.1:5432).
   #
   # POSTGRES_PASSWORD is pasted into the api/crawler DATABASE_URL below as-is,
   # so keep it to letters and digits - '@', '/', ':', '#' or '%' would break
@@ -74,7 +74,7 @@ services:
       # localhost inside a container is the container itself. S3_PUBLIC_URL
       # is not overridden: it has to be an address the phone can reach.
       S3_ENDPOINT: http://minio:9000
-      # Overrides backend/.env's localhost URL, which is for host-side commands.
+      # Overrides backend/.env's 127.0.0.1 URL, which is for host-side commands.
       DATABASE_URL: postgres://${POSTGRES_USER:-cookmate}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-cookmate}
     depends_on:
       postgres:
