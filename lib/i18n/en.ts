@@ -381,6 +381,7 @@ const en = {
   'auth.errorPasswordIncorrect': 'That password is incorrect. Try again.',
   'auth.errorAccountNotFound': 'No account found with this email.',
   'auth.errorPasswordPwned': 'This password has appeared in a data breach. Please choose another.',
+  'auth.errorCodeRequired': 'Please enter the code from the email.',
   'auth.errorCodeIncorrect': 'That code is incorrect.',
   'auth.errorCodeExpired': 'That code has expired. Request a new one.',
   'auth.errorTooManyAttempts': 'Too many attempts. Please wait a moment and try again.',

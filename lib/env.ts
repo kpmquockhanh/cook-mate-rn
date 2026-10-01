@@ -40,9 +40,10 @@ const missing = (Object.keys(REQUIRED) as (keyof typeof REQUIRED)[])
 if (missing.length > 0) {
   throw new Error(
     `Missing required environment ${missing.length === 1 ? 'variable' : 'variables'}: ` +
-      `${missing.join(', ')}. Copy .env.example to .env and fill ${missing.length === 1 ? 'it' : 'them'} in ` +
-      `(or run \`npm run setup\`), then restart the dev server - Expo inlines these at build time, ` +
-      `so an already-running bundler will not pick up the change.`,
+      `${missing.join(', ')}. Copy .env.example to .env and fill ` +
+      `${missing.length === 1 ? 'it' : 'them'} in (or run \`npm run setup\`), then restart ` +
+      `the dev server - Expo inlines these at build time, ` +
+      `so an already-running bundler will not pick up the change.`
   );
 }
 

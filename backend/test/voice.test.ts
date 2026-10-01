@@ -15,6 +15,7 @@ const { buildServer } = await import('../src/api/server.js');
 const { setJwksForTesting } = await import('../src/api/auth.js');
 const { close } = await import('../src/db.js');
 const { AGENT_NAME, slug } = await import('../src/api/routes/voice.js');
+const { env } = await import('../src/env.js');
 installTestJwks(setJwksForTesting);
 
 // No database: the route only signs a token.
@@ -73,6 +74,20 @@ test('POST /voice/token', async (t) => {
       await authHeaders(),
     );
     assert.equal(response.json().data.roomName, `cooking-${TEST_USER_ID}-7`);
+  });
+
+  // The LiveKit settings are read once at load, so the test blanks the loaded
+  // value rather than process.env.
+  await t.test('500s with a clear error when LiveKit is not configured', async () => {
+    const saved = env.livekitApiSecret;
+    env.livekitApiSecret = undefined;
+    try {
+      const response = await post({ recipeId: '42' }, await authHeaders());
+      assert.equal(response.statusCode, 500);
+      assert.deepEqual(response.json(), { error: 'Voice service is not configured' });
+    } finally {
+      env.livekitApiSecret = saved;
+    }
   });
 });
 

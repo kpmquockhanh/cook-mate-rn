@@ -85,7 +85,12 @@ export async function mintHs256Token(): Promise<string> {
     .sign(new TextEncoder().encode('an-hs256-secret-the-api-must-not-accept'));
 }
 
+/** `Authorization` header carrying `token`, valid or not. */
+export function bearer(token: string): { authorization: string } {
+  return { authorization: `Bearer ${token}` };
+}
+
 /** `Authorization` header for a freshly minted valid token. */
 export async function authHeaders(overrides: TokenOverrides = {}): Promise<{ authorization: string }> {
-  return { authorization: `Bearer ${await mintToken(overrides)}` };
+  return bearer(await mintToken(overrides));
 }

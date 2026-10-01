@@ -31,6 +31,25 @@ export function toAppUser(user: ClerkUserLike | null | undefined): AppUser | nul
   };
 }
 
+/** The part of Clerk's UserResource that saving a display name needs. */
+export interface DisplayNameTarget {
+  unsafeMetadata?: Record<string, unknown>;
+  update(params: { unsafeMetadata: Record<string, unknown> }): Promise<unknown>;
+}
+
+/**
+ * Stores the Settings name in Clerk's unsafeMetadata.display_name, keeping the
+ * other keys. Rejects with no user, so the caller shows an error instead of
+ * closing the dialog as though the name had been saved.
+ */
+export async function saveDisplayName(
+  user: DisplayNameTarget | null | undefined,
+  name: string
+): Promise<void> {
+  if (!user) throw new Error('Not signed in');
+  await user.update({ unsafeMetadata: { ...user.unsafeMetadata, display_name: name } });
+}
+
 export type AuthGate = 'loading' | 'signedIn' | 'signedOut';
 
 /**

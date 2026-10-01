@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { currentToken, registerTokenGetter, sendWithAuthRetry, type TokenGetter } from './authToken';
+import {
+  currentToken,
+  registerTokenGetter,
+  sendWithAuthRetry,
+  type TokenGetter,
+} from './authToken';
 
 function recordingGetter(tokens: { cached: string | null; fresh: string | null }) {
   const calls: (boolean | undefined)[] = [];
@@ -69,4 +74,20 @@ test('authToken', async (t) => {
     assert.equal(response.status, 401);
     assert.deepEqual(tokens, [null]);
   });
+
+  // Clerk unreachable at the moment of the refresh: the caller gets the 401 it
+  // already has, not a Clerk exception from inside apiFetch.
+  await t.test(
+    'a fresh-token getter that throws returns the first 401 without resending',
+    async () => {
+      registerTokenGetter(async (options) => {
+        if (options?.skipCache) throw new Error('clerk unreachable');
+        return 'cached';
+      });
+      const { send, tokens } = recordingSend([401]);
+      const response = await sendWithAuthRetry(send);
+      assert.equal(response.status, 401);
+      assert.deepEqual(tokens, ['cached']);
+    }
+  );
 });

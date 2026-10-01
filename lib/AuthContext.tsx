@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect } from 'react';
 import { useAuth as useClerkAuth, useClerk, useUser } from '@clerk/expo';
 import { registerTokenGetter } from './authToken';
-import { authGateState, toAppUser, type AppUser } from './authUser';
+import { authGateState, saveDisplayName, toAppUser, type AppUser } from './authUser';
 
 type AuthContextType = {
   user: AppUser | null;
@@ -48,12 +48,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     signOut: async () => {
       await clerk.signOut();
     },
-    updateDisplayName: async (name: string) => {
-      if (!clerkUser) return;
-      await clerkUser.update({
-        unsafeMetadata: { ...clerkUser.unsafeMetadata, display_name: name },
-      });
-    },
+    updateDisplayName: (name: string) => saveDisplayName(clerkUser, name),
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

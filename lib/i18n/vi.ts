@@ -356,6 +356,7 @@ const vi: Record<TranslationKey, Phrase> = {
   'auth.errorPasswordIncorrect': 'Mật khẩu không đúng. Vui lòng thử lại.',
   'auth.errorAccountNotFound': 'Không tìm thấy tài khoản với email này.',
   'auth.errorPasswordPwned': 'Mật khẩu này đã bị lộ trong một vụ rò rỉ dữ liệu. Vui lòng chọn mật khẩu khác.',
+  'auth.errorCodeRequired': 'Vui lòng nhập mã trong email.',
   'auth.errorCodeIncorrect': 'Mã không đúng.',
   'auth.errorCodeExpired': 'Mã đã hết hạn. Vui lòng yêu cầu mã mới.',
   'auth.errorTooManyAttempts': 'Bạn đã thử quá nhiều lần. Vui lòng đợi một lát rồi thử lại.',

@@ -181,7 +181,7 @@ export async function listRecipes(
     // An exists() rather than a join: the same row can only be favourited once
     // per user, but this keeps paging honest regardless.
     where.push(`exists (select 1 from public.user_favorites f
-                         where f.recipe_id = r.id and f.user_id = ${user}::text)`);
+                         where f.recipe_id = r.id and f.user_id = ${user})`);
   }
 
   // Ordering. `popular` counts real cooking events; everything else is a
@@ -206,7 +206,7 @@ export async function listRecipes(
     `select ${selectColumns(LIST_COLUMNS)},
             exists (
               select 1 from public.user_favorites f
-               where f.recipe_id = r.id and f.user_id = ${user}::text
+               where f.recipe_id = r.id and f.user_id = ${user}
             ) as is_favorite,
             (
               -- ::int because node-pg hands back a bigint count as a string,
@@ -247,7 +247,7 @@ export async function getRecipe(
     `select ${selectColumns(DETAIL_COLUMNS)},
             exists (
               select 1 from public.user_favorites f
-               where f.recipe_id = r.id and f.user_id = $2::text
+               where f.recipe_id = r.id and f.user_id = $2
             ) as is_favorite,
             coalesce((
               select json_agg(json_build_object('id', i.id, 'image_path', i.image_path)
@@ -320,7 +320,7 @@ export async function getRecipe(
 export async function addFavorite(userId: string, recipeId: number): Promise<void> {
   await query(
     `insert into public.user_favorites (user_id, recipe_id)
-     values ($1::text, $2)
+     values ($1, $2)
      on conflict (user_id, recipe_id) do nothing`,
     [userId, recipeId],
   );
@@ -328,7 +328,7 @@ export async function addFavorite(userId: string, recipeId: number): Promise<voi
 
 export async function removeFavorite(userId: string, recipeId: number): Promise<void> {
   await query(
-    `delete from public.user_favorites where user_id = $1::text and recipe_id = $2`,
+    `delete from public.user_favorites where user_id = $1 and recipe_id = $2`,
     [userId, recipeId],
   );
 }
@@ -344,7 +344,7 @@ export async function recordEvent(
 ): Promise<void> {
   await query(
     `insert into public.user_recipe_events (user_id, recipe_id, kind)
-     values ($1::text, $2, $3)`,
+     values ($1, $2, $3)`,
     [userId, recipeId, kind],
   );
 }

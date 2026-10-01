@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
   applyTestAuthEnv,
   authHeaders,
+  bearer,
   installTestJwks,
   mintHs256Token,
   mintToken,
@@ -22,9 +23,10 @@ const { env } = await import('../src/env.js');
 installTestJwks(setJwksForTesting);
 
 /**
- * No database needed: the guard rejects before any handler runs, and the one
- * authorised case only asserts that the request got *past* the guard. That
- * keeps the security tests running everywhere, which is the point of them.
+ * No database needed: the guard rejects before any handler runs, and a request
+ * that gets past it asks for a non-numeric recipe id, which the handler 404s
+ * before querying. That keeps the security tests running everywhere, which is
+ * the point of them, and keeps them quiet when no database is reachable.
  */
 test('API authentication', async (t) => {
   const app = await buildServer();
@@ -35,8 +37,9 @@ test('API authentication', async (t) => {
   });
 
   const get = (headers: Record<string, string> = {}) =>
-    app.inject({ method: 'GET', url: '/recipes?limit=1', headers });
-  const bearer = (token: string) => ({ authorization: `Bearer ${token}` });
+    app.inject({ method: 'GET', url: '/recipes/not-a-number', headers });
+  /** Past the guard: the handler's own 404, not a 401. */
+  const PASSED = 404;
 
   await t.test('rejects a request with no Authorization header', async () => {
     const response = await get();
@@ -93,16 +96,14 @@ test('API authentication', async (t) => {
   // applyTestAuthEnv; the browser's azp has neither.
   await t.test('accepts a web token from an authorized party, however the list was written', async () => {
     const first = await get(bearer(await mintToken({ azp: TEST_AUTHORIZED_PARTY })));
-    assert.notEqual(first.statusCode, 401);
+    assert.equal(first.statusCode, PASSED);
     const second = await get(bearer(await mintToken({ azp: 'https://app.example.com' })));
-    assert.notEqual(second.statusCode, 401);
+    assert.equal(second.statusCode, PASSED);
   });
 
   await t.test('accepts a native token, which carries no azp', async () => {
     const response = await get(await authHeaders());
-    // 200 with a database behind it, 500 without - either way it is not the
-    // guard turning it away.
-    assert.notEqual(response.statusCode, 401);
+    assert.equal(response.statusCode, PASSED);
   });
 
   await t.test('rejects a token minted without exp', async () => {
@@ -121,7 +122,7 @@ test('API authentication', async (t) => {
       assert.equal(web.statusCode, 401);
       assert.equal(web.json().reason, 'invalid_token');
       const native = await get(await authHeaders());
-      assert.notEqual(native.statusCode, 401);
+      assert.equal(native.statusCode, PASSED);
     } finally {
       env.clerkAuthorizedParties.push(...saved);
     }

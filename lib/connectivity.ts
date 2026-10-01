@@ -2,6 +2,7 @@ import { useSyncExternalStore } from 'react';
 import { AppState, Platform } from 'react-native';
 import { env } from './env';
 import { logger } from './log';
+import { classifyProbe, type ProbeAnswer } from './outage';
 
 const log = logger('connectivity');
 
@@ -21,10 +22,11 @@ const log = logger('connectivity');
  * failed while offline load themselves again without the user pulling to
  * refresh.
  *
- * Offline vs server-down: when /health cannot be reached at all, the storage
- * host is tried too. If it answers, the network is fine and it is our server
- * that is down; if neither answers, the device is offline. The two get
- * different wording because they ask different things of the user.
+ * Offline vs server-down (lib/outage.ts): a /health that answers with an
+ * error is our server. When /health cannot be reached at all, the storage host
+ * is tried too. If it answers, the network is fine and it is our server that
+ * is down; if neither answers, the device is offline. The two get different
+ * wording because they ask different things of the user.
  */
 
 export type ConnectionStatus = 'online' | 'offline' | 'server-down';
@@ -131,15 +133,15 @@ function scheduleProbe(delay: number) {
   probeTimer = setTimeout(() => void probe(), delay);
 }
 
-/** Resolves true if `url` answered at all within the timeout. */
-async function reachable(url: string, ok: (response: Response) => boolean): Promise<boolean> {
+/** How `url` answered within the timeout: a 2xx, another HTTP status, or not at all. */
+async function answerOf(url: string): Promise<ProbeAnswer> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS);
   try {
     const response = await fetch(url, { method: 'GET', signal: controller.signal });
-    return ok(response);
+    return response.ok ? 'ok' : 'error';
   } catch {
-    return false;
+    return 'no-answer';
   } finally {
     clearTimeout(timer);
   }
@@ -153,20 +155,23 @@ async function probe(): Promise<void> {
 
   try {
     // /health runs `select 1`, so a 200 means the API and its database are up.
-    if (await reachable(`${env.apiUrl}/health`, (response) => response.ok)) {
+    const health = await answerOf(`${env.apiUrl}/health`);
+    const browserOffline =
+      Platform.OS === 'web' && typeof navigator !== 'undefined' && navigator.onLine === false;
+    // The storage host is only worth asking when /health gave no answer at
+    // all; even a 400/401/404 from it proves the network works.
+    const storage =
+      health === 'no-answer' && !browserOffline && (await answerOf(env.storageUrl)) !== 'no-answer'
+        ? 'answered'
+        : 'no-answer';
+
+    const status = classifyProbe({ health, storage, browserOffline });
+    if (status === 'online') {
       markOnline();
       return;
     }
-
-    // Any HTTP answer from the storage host proves the network works, so even
-    // a 400/401/404 counts.
-    const networkUp =
-      Platform.OS === 'web' && typeof navigator !== 'undefined' && navigator.onLine === false
-        ? false
-        : await reachable(env.storageUrl, () => true);
-
     backoffMs = Math.min(backoffMs * 2, BACKOFF_MAX_MS);
-    setState({ status: networkUp ? 'server-down' : 'offline', checking: false });
+    setState({ status, checking: false });
     scheduleProbe(backoffMs);
   } finally {
     probing = false;

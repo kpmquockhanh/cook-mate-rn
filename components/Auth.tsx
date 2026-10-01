@@ -157,7 +157,7 @@ export default function Auth() {
   async function verifyCode() {
     if (loading) return;
     if (!code.trim()) {
-      setMessage({ kind: 'error', text: t('auth.errorCodeIncorrect') });
+      setMessage({ kind: 'error', text: t('auth.errorCodeRequired') });
       return;
     }
     Keyboard.dismiss();
