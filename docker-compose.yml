@@ -3,18 +3,48 @@
 # `npm start` / Expo Go / a device build), not a service to containerize.
 #
 # Usage:
-#   cp .env.example .env                   # MINIO_ROOT_USER / MINIO_ROOT_PASSWORD
-#                                           # (compose reads the root .env)
-#   cp backend/.env.example backend/.env   # fill in DATABASE_URL, provider keys,
+#   cp .env.example .env                   # MINIO_ROOT_USER / MINIO_ROOT_PASSWORD,
+#                                           # POSTGRES_PASSWORD (+ optional POSTGRES_USER,
+#                                           # POSTGRES_DB) - compose reads the root .env
+#   cp backend/.env.example backend/.env   # fill in DATABASE_URL (the localhost one, for
+#                                           # host-side commands), provider keys,
 #                                           # S3_ACCESS_KEY_ID/S3_SECRET_ACCESS_KEY
 #                                           # (the MinIO credentials), S3_PUBLIC_URL,
 #                                           # REVIEW_USERNAME/PASSWORD,
 #                                           # CLERK_ISSUER, CLERK_AUTHORIZED_PARTIES,
 #                                           # LIVEKIT_URL/_API_KEY/_API_SECRET (voice tokens)
 #   cp agent/.env.example agent/.env       # fill in LIVEKIT_*
+#   docker compose up -d postgres minio
+#   (cd backend && npm run setup)          # once, on a new database: migrate + seed
 #   docker compose up --build
 
 services:
+  # The database for the pipeline and the API. Nothing migrates on start: run
+  # `npm run setup` from backend/ once against a new database (host-side
+  # commands reach it on localhost:5432).
+  #
+  # POSTGRES_PASSWORD is pasted into the api/crawler DATABASE_URL below as-is,
+  # so keep it to letters and digits - '@', '/', ':', '#' or '%' would break
+  # the URL.
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-cookmate}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in the root .env}
+      POSTGRES_DB: ${POSTGRES_DB:-cookmate}
+    ports:
+      - "127.0.0.1:5432:5432" # user data: reachable from this machine only
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      # Over TCP on purpose: on a fresh volume the image first runs a
+      # socket-only init server, which a socket check would call healthy.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
   # Object storage for crawled pages and recipe images (S3 API on 9000, web
   # console on 9001). The backend creates its buckets itself: run
   # `npm run dev -- storage check` and `npm run dev -- images --check`.
@@ -44,8 +74,13 @@ services:
       # localhost inside a container is the container itself. S3_PUBLIC_URL
       # is not overridden: it has to be an address the phone can reach.
       S3_ENDPOINT: http://minio:9000
+      # Overrides backend/.env's localhost URL, which is for host-side commands.
+      DATABASE_URL: postgres://${POSTGRES_USER:-cookmate}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-cookmate}
     depends_on:
-      - minio
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_started
     ports:
       - "8787:8787"
     restart: unless-stopped
@@ -62,8 +97,12 @@ services:
       # REVIEW_PASSWORD (see backend/src/ui/server.ts).
       REVIEW_HOST: "0.0.0.0"
       S3_ENDPOINT: http://minio:9000
+      DATABASE_URL: postgres://${POSTGRES_USER:-cookmate}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-cookmate}
     depends_on:
-      - minio
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_started
     ports:
       - "5174:5174"
     restart: unless-stopped
@@ -85,3 +124,4 @@ services:
 
 volumes:
   minio-data:
+  postgres-data:
