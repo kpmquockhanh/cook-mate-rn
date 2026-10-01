@@ -13,6 +13,9 @@
 export async function databaseSkipReason(): Promise<string | false> {
   // Load the project's .env the way every entry point does, so a developer
   // with a working database actually runs these instead of watching them skip.
+  // That database is the one they run against, REQUIRE_DATABASE or not, and
+  // api.test.ts writes (and removes) fixture rows in it. A DATABASE_URL set in
+  // the environment wins, because dotenv never overrides an existing key.
   await import('dotenv/config');
   const flag = process.env.REQUIRE_DATABASE ?? '';
   const required = requireDatabase(flag);

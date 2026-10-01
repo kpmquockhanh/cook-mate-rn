@@ -39,6 +39,7 @@ services:
     healthcheck:
       # Over TCP on purpose: on a fresh volume the image first runs a
       # socket-only init server, which a socket check would call healthy.
+      # 127.0.0.1 here is the container's own loopback, not the host's.
       test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
       interval: 5s
       timeout: 3s

@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 import pg from 'pg';
 import { poolConfig } from '../src/db.js';
@@ -25,9 +28,16 @@ test('127.0.0.1 with no sslmode connects without TLS', () => {
 });
 
 test('sslmode=verify-full turns on verified TLS', () => {
-  const ssl = tlsOf('postgres://u:p@db.example.com:5432/db?sslmode=verify-full');
-  assert.ok(ssl && typeof ssl === 'object', 'expected TLS options');
-  assert.notEqual((ssl as { rejectUnauthorized?: boolean }).rejectUnauthorized, false);
+  // Empty options: TLS on, with Node's defaults, which verify the certificate
+  // and the hostname.
+  assert.deepEqual(tlsOf('postgres://u:p@db.example.com:5432/db?sslmode=verify-full'), {});
+});
+
+test('sslrootcert adds a private CA to verify-full', () => {
+  const ca = join(mkdtempSync(join(tmpdir(), 'cookmate-ca-')), 'ca.pem');
+  writeFileSync(ca, 'not a real certificate\n');
+  const url = `postgres://u:p@db.example.com:5432/db?sslmode=verify-full&sslrootcert=${encodeURIComponent(ca)}`;
+  assert.deepEqual(tlsOf(url), { ca: 'not a real certificate\n' });
 });
 
 test('sslmode=no-verify turns on TLS without certificate checks', () => {

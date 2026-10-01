@@ -137,8 +137,11 @@ table or column that is missing.
 
 - no `sslmode` — plain TCP. Right for docker compose and `127.0.0.1`.
 - `?sslmode=verify-full` — TLS, and the server's certificate must verify.
+- `?sslmode=verify-full&sslrootcert=/path/to/ca.pem` — the same, for a server
+  whose certificate comes from a private CA (most managed providers publish
+  theirs). Prefer this to `no-verify`.
 - `?sslmode=no-verify` — TLS without checking the certificate, for a
-  self-signed server.
+  self-signed server when you have no CA file.
 
 Don't use `sslmode=require`: pg 8 treats it as `verify-full` but prints a
 warning that pg 9 changes its meaning. And check your shell for an exported
@@ -442,7 +445,10 @@ filters are exercised even on an empty database. It and `test/locks.test.ts`
 skip themselves when Postgres is unreachable (`test/db-helpers.ts`), except
 with `REQUIRE_DATABASE=1` (or `true`) — set in CI, which runs them against a
 Postgres service container — where an unreachable database fails them instead.
-Any other value is an error rather than a silent skip.
+Any other value is an error rather than a silent skip. Like every entry point,
+the helper loads `backend/.env` first, so locally these tests run against
+whatever its `DATABASE_URL` points at; to aim them at a scratch database, set
+`DATABASE_URL` on the command line, which `.env` never overrides.
 
 ## Architecture
 
