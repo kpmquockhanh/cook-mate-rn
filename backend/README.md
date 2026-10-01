@@ -167,8 +167,8 @@ change the compose port mapping and the port in `DATABASE_URL` to match.
 4. `npm run dev -- storage check && npm run dev -- images --check`, then
    `npm run pipeline` and `npm run publish` to fill it again.
 5. Once the app works against it, delete the Supabase CLI's local state
-   (`rm -rf supabase/` from the repo root — it shows as untracked until you
-   do) and pause or delete the Supabase project in its dashboard.
+   (`rm -rf supabase/` from the repo root) and pause or delete the Supabase
+   project in its dashboard.
 
 Favorites, shopping signals and hand-reviewed recipes that lived only in
 Supabase are gone after this.
@@ -436,10 +436,13 @@ Three things worth knowing before you extend it:
 `test/api-contract.test.ts` diffs the columns the API selects against
 `src/publish/mapping.ts` and needs no database, so a rename on either side fails
 the suite instead of blanking a screen. `test/api.test.ts` drives real routes
-via `app.inject()`. It and `test/locks.test.ts` skip themselves when Postgres
-is unreachable (`test/db-helpers.ts`), except with `REQUIRE_DATABASE=1` — set
-in CI, which runs them against a Postgres service container — where an
-unreachable database fails them instead.
+via `app.inject()`; it inserts two recipes whose titles carry an
+`api-test-<pid>-<timestamp>` marker and deletes them when it finishes, so the
+filters are exercised even on an empty database. It and `test/locks.test.ts`
+skip themselves when Postgres is unreachable (`test/db-helpers.ts`), except
+with `REQUIRE_DATABASE=1` (or `true`) — set in CI, which runs them against a
+Postgres service container — where an unreachable database fails them instead.
+Any other value is an error rather than a silent skip.
 
 ## Architecture
 

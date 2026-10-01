@@ -17,12 +17,53 @@ const skip = await databaseSkipReason();
 
 test('recipes API', { skip }, async (t) => {
   const { buildServer } = await import('../src/api/server.js');
-  const { close } = await import('../src/db.js');
+  const { close, one, query } = await import('../src/db.js');
   const { setJwksForTesting } = await import('../src/api/auth.js');
   installTestJwks(setJwksForTesting);
   const app = await buildServer();
 
+  // Two recipes of our own, so the filter and favourite tests assert something
+  // on an empty database (CI migrates but never publishes). The marker is in
+  // both titles and every filter query searches for it, which keeps a
+  // developer's real rows out of the results and puts ours on the first page.
+  // Deleting them cascades to any favourites and events the tests left.
+  const marker = `api-test-${process.pid}-${Date.now()}`;
+  const insertFixture = async (fields: {
+    title: string;
+    meal: string;
+    totalSeconds: number;
+    activeSeconds: number;
+    diet: string[];
+  }): Promise<number> => {
+    const row = await one<{ id: number }>(
+      `insert into public.recipes (title, meal, total_time_seconds, active_time_seconds, diet)
+       values ($1, $2, $3, $4, $5) returning id`,
+      [`${fields.title} ${marker}`, fields.meal, fields.totalSeconds, fields.activeSeconds, fields.diet],
+    );
+    if (!row) throw new Error('fixture insert returned no row');
+    return row.id;
+  };
+  // Quick, vegetarian, dinner.
+  const quickId = await insertFixture({
+    title: 'Quick vegetarian dinner',
+    meal: 'dinner',
+    totalSeconds: 20 * 60,
+    activeSeconds: 15 * 60,
+    diet: ['vegetarian'],
+  });
+  // Hands-off: eight hours on the clock, ten minutes of work, diet unknown.
+  const slowId = await insertFixture({
+    title: 'Slow cooker lunch',
+    meal: 'lunch',
+    totalSeconds: 8 * 60 * 60,
+    activeSeconds: 10 * 60,
+    diet: [],
+  });
+  const search = `search=${encodeURIComponent(marker)}`;
+  const ids = (body: { data: { id: number }[] }) => body.data.map((row) => row.id);
+
   t.after(async () => {
+    await query('delete from public.recipes where id = any($1::bigint[])', [[quickId, slowId]]);
     await app.close();
     await close();
   });
@@ -31,6 +72,16 @@ test('recipes API', { skip }, async (t) => {
     const response = await app.inject({ method: 'GET', url: '/health' });
     assert.equal(response.statusCode, 200);
     assert.deepEqual(response.json(), { ok: true });
+  });
+
+  await t.test('GET /recipes returns the fixtures', async () => {
+    const response = await app.inject({
+      method: 'GET',
+      url: `/recipes?${search}`,
+      headers: await authHeaders(),
+    });
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(ids(response.json()).sort(), [quickId, slowId].sort());
   });
 
   await t.test('GET /recipes returns a data array', async () => {
@@ -93,10 +144,11 @@ test('recipes API', { skip }, async (t) => {
   await t.test('a facet filter returns only rows carrying that facet', async () => {
     const response = await app.inject({
       method: 'GET',
-      url: '/recipes?meal=dinner&limit=50',
+      url: `/recipes?meal=dinner&limit=50&${search}`,
       headers: await authHeaders(),
     });
     assert.equal(response.statusCode, 200);
+    assert.deepEqual(ids(response.json()), [quickId]);
     for (const recipe of response.json().data) {
       assert.equal(recipe.meal, 'dinner', `${recipe.title} is not dinner`);
     }
@@ -105,9 +157,10 @@ test('recipes API', { skip }, async (t) => {
   await t.test('maxMinutes never returns a recipe of unknown length', async () => {
     const response = await app.inject({
       method: 'GET',
-      url: '/recipes?maxMinutes=30&limit=50',
+      url: `/recipes?maxMinutes=30&limit=50&${search}`,
       headers: await authHeaders(),
     });
+    assert.deepEqual(ids(response.json()), [quickId]);
     for (const recipe of response.json().data) {
       assert.ok(
         typeof recipe.total_time_seconds === 'number' && recipe.total_time_seconds <= 1800,
@@ -119,9 +172,10 @@ test('recipes API', { skip }, async (t) => {
   await t.test('handsOff means long on the clock and short on work', async () => {
     const response = await app.inject({
       method: 'GET',
-      url: '/recipes?handsOff=true&limit=50',
+      url: `/recipes?handsOff=true&limit=50&${search}`,
       headers: await authHeaders(),
     });
+    assert.deepEqual(ids(response.json()), [slowId]);
     for (const recipe of response.json().data) {
       assert.ok(recipe.active_time_seconds <= 20 * 60, `${recipe.title} is hands-on`);
       assert.ok(recipe.total_time_seconds >= 60 * 60, `${recipe.title} is not long`);
@@ -133,9 +187,10 @@ test('recipes API', { skip }, async (t) => {
     // so an unknown recipe must never come back as vegetarian.
     const response = await app.inject({
       method: 'GET',
-      url: '/recipes?diet=vegetarian&limit=50',
+      url: `/recipes?diet=vegetarian&limit=50&${search}`,
       headers: await authHeaders(),
     });
+    assert.deepEqual(ids(response.json()), [quickId]);
     for (const recipe of response.json().data) {
       assert.ok(recipe.diet.includes('vegetarian'), `${recipe.title} is not vegetarian`);
     }
@@ -145,9 +200,7 @@ test('recipes API', { skip }, async (t) => {
 
   await t.test('favouriting is idempotent and visible on the recipe', async () => {
     const headers = await authHeaders();
-    const list = await app.inject({ method: 'GET', url: '/recipes?limit=1', headers });
-    const recipe = list.json().data[0];
-    if (!recipe) return; // Empty database: nothing to favourite.
+    const recipe = { id: quickId };
 
     // Twice on purpose: the app retries, and a toggle endpoint would undo it.
     for (let i = 0; i < 2; i++) {
@@ -193,9 +246,7 @@ test('recipes API', { skip }, async (t) => {
 
   await t.test('an event is accepted, and an unknown kind is refused', async () => {
     const headers = await authHeaders();
-    const list = await app.inject({ method: 'GET', url: '/recipes?limit=1', headers });
-    const recipe = list.json().data[0];
-    if (!recipe) return;
+    const recipe = { id: quickId };
 
     const accepted = await app.inject({
       method: 'POST',
@@ -216,9 +267,7 @@ test('recipes API', { skip }, async (t) => {
 
   await t.test('one user cannot see another user\'s favourites', async () => {
     const mine = await authHeaders();
-    const list = await app.inject({ method: 'GET', url: '/recipes?limit=1', headers: mine });
-    const recipe = list.json().data[0];
-    if (!recipe) return;
+    const recipe = { id: quickId };
 
     await app.inject({ method: 'PUT', url: `/recipes/${recipe.id}/favorite`, headers: mine });
 

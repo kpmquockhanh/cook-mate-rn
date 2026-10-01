@@ -50,3 +50,23 @@ test('REQUIRE_DATABASE=1 with no DATABASE_URL is a failure, not a skip', async (
   process.env.REQUIRE_DATABASE = '1';
   await assert.rejects(databaseSkipReason(), /^Error: REQUIRE_DATABASE=1 but DATABASE_URL is not set/);
 });
+
+test('REQUIRE_DATABASE=true counts as set', async () => {
+  process.env.DATABASE_URL = '';
+  process.env.REQUIRE_DATABASE = 'true';
+  await assert.rejects(databaseSkipReason(), /^Error: REQUIRE_DATABASE=true but DATABASE_URL is not set/);
+});
+
+test('REQUIRE_DATABASE=0 and =false still skip', async () => {
+  for (const value of ['0', 'false']) {
+    process.env.DATABASE_URL = '';
+    process.env.REQUIRE_DATABASE = value;
+    assert.equal(await databaseSkipReason(), 'DATABASE_URL not set', `REQUIRE_DATABASE=${value}`);
+  }
+});
+
+test('an unrecognised REQUIRE_DATABASE is an error, not a silent skip', async () => {
+  process.env.DATABASE_URL = '';
+  process.env.REQUIRE_DATABASE = 'yes please';
+  await assert.rejects(databaseSkipReason(), /REQUIRE_DATABASE must be 1, true, 0, false or empty, got "yes please"/);
+});
