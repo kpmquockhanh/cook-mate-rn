@@ -454,6 +454,13 @@ export default function Auth() {
                   </LinearGradient>
                 </TouchableOpacity>
 
+                {/* Clerk's bot protection mounts its Smart CAPTCHA into the
+                    element with this id (react-native-web renders it as
+                    the DOM id) when a sign-up - including a first Google sign-in
+                    - starts. Without it Clerk logs an error and falls back to
+                    the invisible widget. Native builds don't use it. */}
+                {Platform.OS === 'web' && <View id="clerk-captcha" />}
+
                 {/* Sign Up Link */}
                 <TouchableOpacity
                   style={styles.signUpContainer}
