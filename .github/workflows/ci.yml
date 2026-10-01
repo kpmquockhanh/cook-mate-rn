@@ -19,6 +19,26 @@ jobs:
   backend:
     name: Backend
     runs-on: ubuntu-latest
+    # The same image docker-compose.yml runs. Throwaway credentials: this
+    # database lives for one job.
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: cookmate
+          POSTGRES_PASSWORD: cookmate
+          POSTGRES_DB: cookmate
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U cookmate -d cookmate"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      # 127.0.0.1, not localhost: db.ts used to force TLS on any URL without
+      # "localhost" in it, so this host catches that regression.
+      DATABASE_URL: postgres://cookmate:cookmate@127.0.0.1:5432/cookmate
+      # The DB tests fail instead of skipping if this database is unreachable.
+      REQUIRE_DATABASE: '1'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -31,9 +51,14 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
         working-directory: backend
-      # The suite is deliberately runnable with no object store and no
-      # DATABASE_URL: storage tests use the filesystem driver or a fake S3
-      # client, and the live MinIO/DB tests skip themselves.
+      # Twice: every migration must be re-runnable, and the second run must
+      # find nothing left to apply.
+      - name: Migrate
+        run: npm run migrate && npm run migrate
+        working-directory: backend
+      # The DB tests (api, locks) run against the service container above.
+      # Storage tests still need no object store: they use a fake S3 client or
+      # the filesystem driver, and the live MinIO test skips itself.
       - name: Test
         run: npm test
         working-directory: backend
