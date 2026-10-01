@@ -1,5 +1,7 @@
 # Product Requirements Document (PRD): CookMate – The Smart Cooking Companion
 
+> **Note:** this document predates the move off Supabase. Auth is now Clerk, the database is self-hosted Postgres, and object storage is S3/MinIO. See `docs/superpowers/specs/` for the current designs; Supabase references below are historical.
+
 ## 1. Overview
 
 **Product name**: CookMate

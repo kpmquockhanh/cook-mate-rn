@@ -1,5 +1,7 @@
 # Project Brief: CookMate - The Smart Cooking Companion
 
+> **Note:** this document predates the move off Supabase. Auth is now Clerk, the database is self-hosted Postgres, and object storage is S3/MinIO. See `docs/superpowers/specs/` for the current designs; Supabase references below are historical.
+
 ## Executive Summary
 
 **CookMate** is a React Native/Expo mobile application that transforms cooking from a static recipe-following experience into an interactive, voice-guided cooking companion. Unlike traditional recipe apps that simply display instructions, CookMate provides real-time cooking assistance through hands-free voice commands, intelligent timing coordination, and step-by-step guidance that adapts to the user's pace. The app targets home cooks who want a more engaging, stress-free cooking experience with professional-level timing and coordination support.

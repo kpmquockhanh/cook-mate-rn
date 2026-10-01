@@ -26,6 +26,7 @@ import { useSettings } from '../../../../lib/SettingsContext';
 import { Note, useRecipe, type Ingredient } from '../../../../hooks/useRecipe';
 import { getImageUrl } from '../../../../utils/index';
 import { scaleIngredientAmount } from '../../../../utils/ingredientScaling';
+import { goBack } from '../../../../lib/navigationRoutes';
 import { LinearGradient } from 'expo-linear-gradient';
 import Reanimated, {
   FadeIn,
@@ -162,7 +163,7 @@ export default function RecipeDetailPage() {
         // If swipe is far enough, go back
         if (gestureState.dx > 100 && gestureState.vx > 0.3) {
           try {
-            router.back();
+            goBack();
           } catch (error) {
             console.warn('Navigation back error:', error);
           }
@@ -345,7 +346,7 @@ export default function RecipeDetailPage() {
           {t('recipe.loadError')}
         </Text>
         <Text className="mb-6 text-center text-gray-600">{error}</Text>
-        <TouchableOpacity className="rounded-lg bg-primary px-6 py-3" onPress={() => router.back()}>
+        <TouchableOpacity className="rounded-lg bg-primary px-6 py-3" onPress={() => goBack()}>
           <Text className="font-semibold text-white">{t('common.goBack')}</Text>
         </TouchableOpacity>
       </View>
@@ -358,7 +359,7 @@ export default function RecipeDetailPage() {
       <View className="flex-1 items-center justify-center bg-white">
         <StatusBar barStyle="dark-content" />
         <Text className="mb-4 text-lg text-gray-600">{t('recipe.notFound')}</Text>
-        <TouchableOpacity className="rounded-lg bg-primary px-6 py-3" onPress={() => router.back()}>
+        <TouchableOpacity className="rounded-lg bg-primary px-6 py-3" onPress={() => goBack()}>
           <Text className="font-semibold text-white">{t('common.goBack')}</Text>
         </TouchableOpacity>
       </View>
@@ -384,7 +385,7 @@ export default function RecipeDetailPage() {
       <View
         className="absolute left-0 right-0 z-20 flex-row items-center justify-between px-5"
         style={{ top: insets.top + 8 }}>
-        {heroButton('chevron-back', () => router.back())}
+        {heroButton('chevron-back', () => goBack())}
         {heroButton(
           isFavorite ? 'heart' : 'heart-outline',
           toggleFavorite,
@@ -600,6 +601,24 @@ export default function RecipeDetailPage() {
           <View className="px-5 pb-4 pt-5">
             {activeTab === 'ingredients' && (
               <View>
+                {notes.length > 0 && (
+                  <View className="mb-8">
+                    <Text className="mb-3 text-xl font-semibold text-gray-800">
+                      {t('recipe.notes')}
+                    </Text>
+                    {notes.map((note, index) => (
+                      <View
+                        key={note.id ?? index}
+                        className="mb-3 flex-row rounded-2xl bg-orange-50 p-4">
+                        <Ionicons name="bulb-outline" size={20} color="#ff8e53" />
+                        <Text className="ml-3 flex-1 text-sm leading-6 text-gray-700">
+                          {note.note_text}
+                        </Text>
+                      </View>
+                    ))}
+                  </View>
+                )}
+
                 <View className="mb-1 flex-row items-baseline justify-between">
                   <Text className="text-xl font-semibold text-gray-800">
                     {t('recipe.tabIngredients')}
@@ -651,24 +670,6 @@ export default function RecipeDetailPage() {
                     {t('recipe.addToShoppingList')}
                   </Text>
                 </TouchableOpacity>
-
-                {notes.length > 0 && (
-                  <View className="mt-8">
-                    <Text className="mb-3 text-xl font-semibold text-gray-800">
-                      {t('recipe.notes')}
-                    </Text>
-                    {notes.map((note, index) => (
-                      <View
-                        key={note.id ?? index}
-                        className="mb-3 flex-row rounded-2xl bg-orange-50 p-4">
-                        <Ionicons name="bulb-outline" size={20} color="#ff8e53" />
-                        <Text className="ml-3 flex-1 text-sm leading-6 text-gray-700">
-                          {note.note_text}
-                        </Text>
-                      </View>
-                    ))}
-                  </View>
-                )}
               </View>
             )}
 

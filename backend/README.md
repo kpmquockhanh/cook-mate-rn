@@ -19,14 +19,14 @@ publishes** — so enrichment is where most of the value is.
 
 ```bash
 # from the repo root: Postgres (and MinIO) in docker compose. Set
-# POSTGRES_PASSWORD (letters and digits) and the MINIO_ROOT_* values in the
-# root .env first.
-docker compose up -d postgres minio
-
+# POSTGRES_PASSWORD (letters and digits) and the MINIO_ROOT_* values in
+# backend/.env first.
 cd backend
 npm install
-cp .env.example .env     # DATABASE_URL=postgres://cookmate:<password>@127.0.0.1:5432/cookmate,
+cp .env.example .env     # POSTGRES_PASSWORD, MINIO_ROOT_*,
+                         # DATABASE_URL=postgres://cookmate:<password>@127.0.0.1:5432/cookmate,
                          # plus ANTHROPIC_API_KEY
+cd .. && docker compose up -d postgres minio && cd backend
 npm run setup            # migrate + seed, in the right order
 npm run publish -- --check   # confirms the publisher's target columns exist
 ```
@@ -316,7 +316,7 @@ cd .. && docker compose up --build api crawler
 ```
 
 The compose file also starts Postgres and MinIO; their credentials
-(`POSTGRES_*`, `MINIO_ROOT_*`) come from the root `.env`. Inside compose the
+(`POSTGRES_*`, `MINIO_ROOT_*`) come from `backend/.env`. Inside compose the
 `api` and `crawler` containers get their own `DATABASE_URL` pointing at
 `postgres:5432`, so `backend/.env`'s `127.0.0.1` URL is only for host-side
 commands. They wait for Postgres to be healthy, but nothing migrates on start:

@@ -318,9 +318,9 @@ const STAGE_INFO = [
   { key: 'crawl', title: 'Crawl', desc: 'Fetch queued URLs, extract recipe markup into raw pages.' },
   { key: 'extract', title: 'Extract', desc: 'Tier D: read recipes off stored pages no markup described. Costs model budget.' },
   { key: 'parse', title: 'Parse', desc: 'Raw pages to staging rows: ingredients, steps, timings.' },
-  { key: 'images', title: 'Images', desc: 'Copy each recipe\'s photos into our own public bucket. Sources without allow_image_use are skipped.' },
   { key: 'enrich', title: 'Enrich', desc: 'Step timers and step-to-ingredient links, from the model.' },
   { key: 'gate', title: 'Gate', desc: 'Score, de-duplicate, route to approved or review.' },
+  { key: 'images', title: 'Images', desc: 'Copy each recipe\'s photos into our own public bucket. Sources without allow_image_use are skipped.' },
   { key: 'publish', title: 'Publish', desc: 'Approved rows into the app tables the API serves, then translates them.' },
   { key: 'translate', title: 'Translate', desc: 'Published recipes in the app\'s other languages. Publish runs this for you; use it for a re-translation or a new locale.' },
 ];
@@ -419,7 +419,7 @@ function renderPipeline() {
         <input type="number" id="limit" value="${state.limit}" min="1" max="5000">
       </label>
       <button class="btn primary" data-run="pipeline"
-        ${running.pipeline ? 'disabled' : ''}>Run crawl → parse → images → enrich → gate</button>
+        ${running.pipeline ? 'disabled' : ''}>Run crawl → parse → enrich → gate → images</button>
       <button class="btn" id="preflight">Check publish schema</button>
       <span class="note" id="preflight-out"></span>
     </div>

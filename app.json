@@ -26,7 +26,8 @@
           "backgroundColor": "#ffffff"
         }
       ],
-      "expo-audio"
+      "expo-audio",
+      "@clerk/expo"
     ],
     "orientation": "portrait",
     "icon": "./assets/icon.png",

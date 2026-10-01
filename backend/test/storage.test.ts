@@ -117,11 +117,11 @@ test('with RAW_PAGE_STORE unset, pages go to the raw-page bucket, gzipped', asyn
   }
 });
 
-test('a leftover RAW_PAGE_STORE value from before MinIO is rejected, not guessed at', () => {
-  process.env.RAW_PAGE_STORE = 'supabase';
+test('an unknown RAW_PAGE_STORE value is rejected, not guessed at', () => {
+  process.env.RAW_PAGE_STORE = 'bogus';
   store.resetPageStore();
   try {
-    assert.throws(() => store.describeStore(), /RAW_PAGE_STORE="supabase".*s3.*file/);
+    assert.throws(() => store.describeStore(), /RAW_PAGE_STORE="bogus".*s3.*file/);
   } finally {
     useFileStore();
   }
