@@ -1,25 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { databaseSkipReason } from './db-helpers.js';
 
 // The whole point of these locks is that they live in Postgres rather than in
-// this process, so there is nothing to test without one. Skip rather than fail
-// when there is none, so `npm test` stays green offline and in CI without
-// secrets - but load the project's .env first, the way every entry point does,
-// so a developer with a working database actually runs these instead of
-// watching them skip.
-async function skipReason(): Promise<string | false> {
-  await import('dotenv/config');
-  if (!process.env.DATABASE_URL) return 'DATABASE_URL not set';
-  try {
-    const { query } = await import('../src/db.js');
-    await query('select 1');
-    return false;
-  } catch (error) {
-    return `database unreachable (${String(error).slice(0, 60)})`;
-  }
-}
-
-const skip = await skipReason();
+// this process, so there is nothing to test without one. db-helpers.ts decides
+// whether that skips (offline) or fails (CI, REQUIRE_DATABASE=1).
+const skip = await databaseSkipReason();
 
 test('job locks', { skip }, async (t) => {
   const { acquireJobLock, withJobLock } = await import('../src/jobs/locks.js');

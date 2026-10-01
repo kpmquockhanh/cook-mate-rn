@@ -2,6 +2,7 @@ import 'dotenv/config';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { applyTestAuthEnv, authHeaders, installTestJwks } from './auth-helpers.js';
+import { databaseSkipReason } from './db-helpers.js';
 
 // Every route but /health needs a token now. Override the auth env before
 // anything under src/ loads, then mint tokens locally - these tests need a
@@ -10,20 +11,9 @@ applyTestAuthEnv();
 
 // These exercise real routes against a real database. They run through
 // app.inject(), so no port is bound and nothing listens - but they still need
-// Postgres. When it is not reachable the suite skips rather than fails, so
-// `npm test` stays green offline and in CI without secrets.
-async function skipReason(): Promise<string | false> {
-  if (!process.env.DATABASE_URL) return 'DATABASE_URL not set';
-  try {
-    const { query } = await import('../src/db.js');
-    await query('select 1');
-    return false;
-  } catch (error) {
-    return `database unreachable (${String(error).slice(0, 60)})`;
-  }
-}
-
-const skip = await skipReason();
+// Postgres. db-helpers.ts decides whether a missing one skips (offline) or
+// fails (CI, REQUIRE_DATABASE=1).
+const skip = await databaseSkipReason();
 
 test('recipes API', { skip }, async (t) => {
   const { buildServer } = await import('../src/api/server.js');
