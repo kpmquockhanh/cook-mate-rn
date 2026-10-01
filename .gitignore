@@ -77,9 +77,6 @@ coverage/
 ## .cursor/
 .cursor/
 
-## Supabase CLI local state
-supabase/.temp/
-
 
 ## Python caches
 __pycache__/

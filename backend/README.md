@@ -18,9 +18,15 @@ publishes** — so enrichment is where most of the value is.
 ## Setup
 
 ```bash
+# from the repo root: Postgres (and MinIO) in docker compose. Set
+# POSTGRES_PASSWORD (letters and digits) and the MINIO_ROOT_* values in the
+# root .env first.
+docker compose up -d postgres minio
+
 cd backend
 npm install
-cp .env.example .env     # fill in DATABASE_URL + ANTHROPIC_API_KEY
+cp .env.example .env     # DATABASE_URL=postgres://cookmate:<password>@localhost:5432/cookmate,
+                         # plus ANTHROPIC_API_KEY
 npm run setup            # migrate + seed, in the right order
 npm run publish -- --check   # confirms the publisher's target columns exist
 ```
@@ -126,8 +132,40 @@ that serves `EXPO_PUBLIC_API_URL`, so the publisher's table/column names are
 and nowhere else. The check introspects your live database and names every
 table or column that is missing.
 
-If you are pointing at a Supabase project that already had the app tables,
-`0000` is a no-op — every statement is `if not exists`.
+**Remote Postgres.** Any Postgres 15+ works; `DATABASE_URL` alone decides TLS
+(`src/db.ts` never sets it):
+
+- no `sslmode` — plain TCP. Right for docker compose and localhost.
+- `?sslmode=verify-full` — TLS, and the server's certificate must verify.
+- `?sslmode=no-verify` — TLS without checking the certificate, for a
+  self-signed server.
+
+Don't use `sslmode=require`: pg 8 treats it as `verify-full` but prints a
+warning that pg 9 changes its meaning.
+
+**Port 5432 already taken.** If Homebrew's or Postgres.app's Postgres is
+running, `docker compose up postgres` fails to bind `127.0.0.1:5432` — or, if
+that server started second, host-side commands quietly connect to it instead.
+Stop the other server (`brew services stop postgresql@17`), or change the
+compose port mapping and the port in `DATABASE_URL` to match.
+
+**Moving from Supabase Postgres** (a fresh start, nothing is copied):
+
+1. In the root `.env`, set `POSTGRES_PASSWORD` (letters and digits; optionally
+   `POSTGRES_USER` and `POSTGRES_DB`, both default `cookmate`), then
+   `docker compose up -d postgres`.
+2. In `backend/.env`, set
+   `DATABASE_URL=postgres://cookmate:<password>@localhost:5432/cookmate`.
+3. `npm run setup` — applies every migration (including 0017, the Clerk user
+   ids) and seeds the canonical dictionary.
+4. `npm run dev -- storage check && npm run dev -- images --check`, then
+   `npm run pipeline` and `npm run publish` to fill it again.
+5. Once the app works against it, delete the Supabase CLI's local state
+   (`rm -rf supabase/` from the repo root — it shows as untracked until you
+   do) and pause or delete the Supabase project in its dashboard.
+
+Favorites, shopping signals and hand-reviewed recipes that lived only in
+Supabase are gone after this.
 
 ## Running it
 
@@ -299,7 +337,14 @@ cp .env.example .env    # fill in DATABASE_URL, provider keys, CLERK_ISSUER,
 cd .. && docker compose up --build api crawler
 ```
 
-The compose file also starts MinIO; its credentials come from the root `.env`.
+The compose file also starts Postgres and MinIO; their credentials
+(`POSTGRES_*`, `MINIO_ROOT_*`) come from the root `.env`. Inside compose the
+`api` and `crawler` containers get their own `DATABASE_URL` pointing at
+`postgres:5432`, so `backend/.env`'s localhost URL is only for host-side
+commands. They wait for Postgres to be healthy, but nothing migrates on start:
+run `npm run setup` once against a new database.
+
+- [ ]
 
 The image installs `devDependencies` too and runs via `tsx`, matching how the
 package.json scripts already run — there's no separate compiled build. The
@@ -387,7 +432,10 @@ Three things worth knowing before you extend it:
 `test/api-contract.test.ts` diffs the columns the API selects against
 `src/publish/mapping.ts` and needs no database, so a rename on either side fails
 the suite instead of blanking a screen. `test/api.test.ts` drives real routes
-via `app.inject()` and skips itself when Postgres is unreachable.
+via `app.inject()`. It and `test/locks.test.ts` skip themselves when Postgres
+is unreachable (`test/db-helpers.ts`), except with `REQUIRE_DATABASE=1` — set
+in CI, which runs them against a Postgres service container — where an
+unreachable database fails them instead.
 
 ## Architecture
 

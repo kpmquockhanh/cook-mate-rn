@@ -20,5 +20,5 @@
       "utils/*": ["./utils/*"]
     }
   },
-  "exclude": ["agent", "supabase", "backend"]
+  "exclude": ["agent", "backend"]
 }
